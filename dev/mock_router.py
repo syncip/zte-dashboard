@@ -54,6 +54,78 @@ SMS = []               # Nachrichtenspeicher des Mock-Routers (wie zwrt_wms: tag
 SMS_NEXT = [1]
 
 
+# --- Feldverschlüsselung der SMS (wie die neuere ZTE-Firmware: RSA-Schlüsselaustausch + AES-256-GCM) ---------- #
+def _is_prime(n):
+    if n < 4:
+        return n > 1
+    for sp in (2, 3, 5, 7, 11, 13, 17, 19, 23, 29):
+        if n % sp == 0:
+            return n == sp
+    d, r = n - 1, 0
+    while d % 2 == 0:
+        d //= 2
+        r += 1
+    for _ in range(12):
+        x = pow(random.randrange(2, n - 1), d, n)
+        if x in (1, n - 1):
+            continue
+        for _ in range(r - 1):
+            x = pow(x, 2, n)
+            if x == n - 1:
+                break
+        else:
+            return False
+    return True
+
+
+def _prime(bits):
+    while True:
+        c = random.getrandbits(bits) | (1 << (bits - 1)) | 1
+        if _is_prime(c):
+            return c
+
+
+def _der(tag, body):
+    ln = len(body)
+    hdr = bytes([tag, ln]) if ln < 128 else bytes([tag, 0x80 | (ln.bit_length() + 7) // 8]) + ln.to_bytes((ln.bit_length() + 7) // 8, "big")
+    return hdr + body
+
+
+def _der_int(v):
+    b = v.to_bytes((v.bit_length() + 8) // 8, "big")
+    return _der(0x02, b)
+
+
+RSA = {}
+
+
+def rsa_init():
+    import base64
+    p, q = _prime(512), _prime(512)
+    n, e = p * q, 65537
+    RSA.update(n=n, e=e, d=pow(e, -1, (p - 1) * (q - 1)))
+    spki = _der(0x30, _der(0x30, bytes.fromhex("06092A864886F70D0101010500")) + _der(0x03, b"\0" + _der(0x30, _der_int(n) + _der_int(e))))
+    b64 = base64.b64encode(spki).decode()
+    RSA["pem"] = "-----BEGIN PUBLIC KEY-----\n" + "\n".join(b64[i:i + 64] for i in range(0, len(b64), 64)) + "\n-----END PUBLIC KEY-----"
+
+
+SESSION_KEYS = {}      # sid -> AES-Schlüssel (vom Client per web_http_enstr_set übergeben)
+
+
+def _seal(sid, plain):
+    import zte_dash as z
+    key = SESSION_KEYS.get(sid)
+    return z.wms_seal(key, plain) if key and STATE.get("enc", True) else plain
+
+
+def _open(sid, value):
+    import zte_dash as z
+    key = SESSION_KEYS.get(sid)
+    if not key or not STATE.get("enc", True):
+        return value
+    return z.wms_open(key, value)
+
+
 def _hex(t):
     return t.encode("utf-16-be").hex().upper()
 
@@ -61,8 +133,8 @@ def _hex(t):
 def sms_add(number, text, tag, when=None):
     from datetime import datetime
     lt = datetime.fromtimestamp(when or time.time()).astimezone()
-    off = lt.utcoffset().total_seconds() / 3600
-    tz = "0" if off == 0 else (f"+{off:g}" if off > 0 else f"{off:g}")
+    off = int(round(lt.utcoffset().total_seconds() / 900))      # Viertelstunden wie das echte Gerät (MESZ = +8)
+    tz = "0" if off == 0 else (f"+{off}" if off > 0 else f"{off}")
     date = ",".join([lt.strftime("%y"), lt.strftime("%m"), lt.strftime("%d"), lt.strftime("%H"), lt.strftime("%M"), lt.strftime("%S"), tz])
     SMS.append({"id": str(SMS_NEXT[0]), "number": number, "content": _hex(text), "tag": str(tag), "date": date,
                 "mem_store": "1", "draft_group_id": ""})
@@ -149,6 +221,12 @@ class Handler(BaseHTTPRequestHandler):
         if u.path == "/mock/incoming":
             sms_add(q.get("number", ["+4917099999999"])[0], q.get("text", ["Test-SMS"])[0], 1)
             msg = "ok"
+        elif u.path == "/mock/smsstrict":
+            STATE["sms_strict"] = q.get("on", ["1"])[0] == "1"
+            msg = "ok"
+        elif u.path == "/mock/enc":          # Verschlüsselung der SMS-Felder an/aus (Firmware ohne Verschlüsselung)
+            STATE["enc"] = q.get("on", ["1"])[0] == "1"
+            msg = "ok"
         elif u.path == "/mock/smsfail":
             STATE["sms_fail"] = q.get("on", ["1"])[0] == "1"
             msg = "ok"
@@ -165,7 +243,8 @@ class Handler(BaseHTTPRequestHandler):
         out = []
         for req in body if isinstance(body, list) else [body]:
             if req.get("method") == "list":
-                out.append({"jsonrpc": "2.0", "id": req.get("id"), "result": [0, {"zte_libwms_get_sms_data": {}, "zte_libwms_send_sms": {}, "zwrt_wms_delete_sms": {}}]})
+                sig = {}
+                out.append({"jsonrpc": "2.0", "id": req.get("id"), "result": {"zwrt_wms": sig}})
                 continue
             sid, obj, method, args = (req.get("params") + [{}])[:4]
             out.append({"jsonrpc": "2.0", "id": req.get("id"), **self.dispatch(sid, obj, method, args or {})})
@@ -190,6 +269,22 @@ class Handler(BaseHTTPRequestHandler):
                 return {"result": [0, {"ubus_rpc_session": new}]}
             STATE["fail"] += 1
             return {"result": [0, {"result": "1"}]}
+        if (obj, method) == ("zwrt_web", "web_crt_get"):
+            if not authed:
+                return denied
+            if not STATE.get("enc", True):
+                return {"error": {"code": -32000, "message": "Object not found"}}
+            return {"result": [0, {"result": RSA["pem"]}]}
+        if (obj, method) == ("zwrt_web", "web_http_enstr_set"):
+            if not authed:
+                return denied
+            import base64
+            em = pow(int.from_bytes(base64.b64decode(args.get("web_enstr", "")), "big"), RSA["d"], RSA["n"]).to_bytes(
+                (RSA["n"].bit_length() + 7) // 8, "big")
+            key_hex = em[em.index(b"\0", 2) + 1:].decode()
+            SESSION_KEYS[sid] = bytes.fromhex(key_hex)
+            print("web_http_enstr_set -> Schlüssel gesetzt", flush=True)
+            return {"result": [0, {"result": "0"}]}
         if (obj, method) == ("zte_nwinfo_api", "nwinfo_get_netinfo"):
             d = netinfo(time.time())
             d["net_select"] = STATE["select"]
@@ -216,13 +311,36 @@ class Handler(BaseHTTPRequestHandler):
             if not authed:
                 return denied
             if method == "zte_libwms_get_sms_data":
-                return {"result": [0, {"messages": list(reversed(SMS))}]}
+                out = []
+                for m in reversed(SMS):
+                    m = dict(m)
+                    num = m["number"]
+                    if m.get("tag") == "3":          # wie am echten Gerät: Nummer als UTF-16-Hex
+                        num = _hex(num)
+                    m["number"], m["content"] = _seal(sid, num), _seal(sid, m["content"])
+                    out.append(m)
+                return {"result": [0, {"messages": out}]}
             if method == "zte_libwms_send_sms":
                 if STATE["sms_fail"]:
                     return {"result": [0, {"result": 2}]}
+                if set(args) != {"id", "number", "sms_time", "message_body", "encode_type"} \
+                        or args.get("encode_type") not in ("GSM7_default", "UNICODE") \
+                        or (STATE.get("sms_strict") and (args.get("id") != "-1" or ";" not in str(args.get("sms_time")))):
+                    print("send_sms -> INVALID ARGUMENT", sorted(args), flush=True)
+                    return {"result": [2]}
+                try:
+                    args = dict(args, number=_open(sid, args["number"]), message_body=_open(sid, args["message_body"]))
+                except ValueError:
+                    print("send_sms -> INVALID ARGUMENT (nicht entschlüsselbar)", flush=True)
+                    return {"result": [2]}
                 text = bytes.fromhex(args.get("message_body", "")).decode("utf-16-be")
                 num = args.get("number", "")
-                d = str(args.get("sms_time", "")).replace(";", ",")
+                parts = str(args.get("sms_time", "")).replace(";", ",").split(",")        # Router rechnet Stunden in Viertelstunden um
+                try:
+                    parts[6] = f"{float(parts[6]) * 4:+.0f}"
+                except (IndexError, ValueError):
+                    pass
+                d = ",".join(parts)
                 SMS.append({"id": str(SMS_NEXT[0]), "number": num, "content": args.get("message_body", ""), "tag": "2",
                             "date": d, "mem_store": "1", "draft_group_id": ""})
                 SMS_NEXT[0] += 1
@@ -320,5 +438,6 @@ if __name__ == "__main__":
         seed(a.seed, a.days)
     else:
         init_counters()
+        rsa_init()
         print(f"Mock-Router auf http://127.0.0.1:{a.port}  (Passwort: {PASSWORD})")
         ThreadingHTTPServer(("127.0.0.1", a.port), Handler).serve_forever()

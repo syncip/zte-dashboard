@@ -6,6 +6,37 @@ Nur Python-Standardbibliothek, keine Abhängigkeiten.
 
 Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **SMS** · **Setup** (Router-Standort finden) · **Einstellungen**.
 
+![Dashboard mit Signalstärke, Signalwerten und Latenz](docs/dashboard.png)
+
+*Dashboard: Signalstärke und -qualität, Latenz mit Ausfällen und Verbindungs-Neustarts (Beispieldaten aus dem Mock-Router).*
+
+<details>
+<summary>Weitere Ansichten</summary>
+
+**Verbrauchsverlauf** mit wählbarer Auflösung (10 Min, Stunde, Tag, Woche, Monat) und Prognose:
+
+![Datenverbrauch und Verbrauchsverlauf](docs/verbrauch.png)
+
+**Auswertung nach Tageszeit** (Verlauf je Stunde und Heatmap Wochentag × Stunde):
+
+![Auswertung nach Tageszeit](docs/auswertung.png)
+
+**Setup** – den besten Router-Standort finden (Bewertung in Worten, optional mit Ton):
+
+![Setup-Seite zur Standortsuche](docs/setup.png)
+
+**SMS** empfangen und senden, dazu eine Token-API für Skripte und Smart Home:
+
+![SMS-Eingang](docs/sms.png)
+
+![SMS-API mit Token-Verwaltung und Beschreibung](docs/sms-api.png)
+
+**Einstellungen** – alles ohne Neustart im Dashboard änderbar:
+
+![Einstellungen](docs/einstellungen.png)
+
+</details>
+
 ## Start
 
 Das Ganze muss auf einem Gerät laufen, das den Router erreicht (Windows-PC, Raspberry Pi, NAS, Mini-PC, Docker-Host im Heimnetz).
@@ -34,11 +65,16 @@ Das Repo enthält `.github/workflows/docker.yml`: bei jedem Push auf `main` (und
 (amd64 + arm64, also auch Raspberry Pi) gebaut und nach Docker Hub hochgeladen.
 
 1. Repository auf GitHub anlegen und den Inhalt dieses Ordners hochladen (`.env` und `data/` sind per `.gitignore` ausgeschlossen).
-2. In Docker Hub unter *Account Settings → Personal access tokens* ein Token mit Schreibrechten erzeugen.
+2. In Docker Hub unter *Account Settings → Personal access tokens* ein Token mit der Berechtigung *Read, Write, Delete* erzeugen (Details unter Punkt 6).
 3. In GitHub unter *Settings → Secrets and variables → Actions* zwei Secrets anlegen: `DOCKERHUB_USERNAME` und `DOCKERHUB_TOKEN`.
 4. Push auslösen (oder *Actions → Docker Image → Run workflow*). Das Image heißt `<DOCKERHUB_USERNAME>/zte-dashboard`.
 5. Starten: `docker run -d --name zte-dash -p 8080:8080 -v $(pwd)/data:/data <user>/zte-dashboard:latest`
    (das Volume `/data` enthält die Datenbank – nicht weglassen, sonst sind die Daten beim Neuanlegen des Containers weg).
+6. **README auf Docker Hub:** Der Workflow überträgt nach jedem Build automatisch diese `README.md` als Beschreibung auf die Docker-Hub-Seite des Images
+   (Bilder aus `docs/` werden dabei auf absolute GitHub-Adressen umgeschrieben, damit sie auch auf Docker Hub erscheinen).
+   Dafür braucht das Docker-Hub-Token laut Dokumentation der verwendeten Action (`peter-evans/dockerhub-description`) die Berechtigung **Read, Write, Delete**.
+   Das Repository auf GitHub muss öffentlich sein, sonst kann Docker Hub die Bilder nicht laden. Die Docker-Hub-Beschreibung ist auf 25 000 Byte begrenzt;
+   diese README hat ca. 17 000 Byte. Wird sie größer, kürzt die Action automatisch und warnt im Log.
 
 Hinweise: Der Container braucht nur Netzzugriff auf den Router (Standard `http://192.168.168.1`, per `-e ZTE_HOST=…` oder in den Einstellungen änderbar).
 Den Port `8080` nicht ungeschützt ins Internet freigeben – vorher Passwortschutz aktivieren und HTTPS-Proxy davorsetzen.
