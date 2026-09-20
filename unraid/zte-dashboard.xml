@@ -12,7 +12,7 @@
   <Category>Tools: Network:Other</Category>
   <WebUI>http://[IP]:[PORT:8080]/</WebUI>
   <TemplateURL/>
-  <Icon/>
+  <Icon>https://raw.githubusercontent.com/syncip/zte-dashboard/main/static/logo.png</Icon>
   <ExtraParams>--restart=unless-stopped</ExtraParams>
   <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Port des Dashboards (falls 8080 belegt ist, links einen anderen wählen)" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
   <Config Name="Daten (Datenbank)" Target="/data" Default="/mnt/user/appdata/zte-dashboard" Mode="rw" Description="Hier liegt die SQLite-Datenbank. Nicht löschen!" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/zte-dashboard</Config>
