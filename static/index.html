@@ -1,0 +1,1839 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ZTE G5TS Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M8 21v3M13 17v7M18 13v11M23 8v16' stroke='white' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f4f4f1; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --grid: #e1e0d9; --axis: #c3c2b7; --border: rgba(11,11,11,.10); --wash: rgba(11,11,11,.05);
+  --s1: #2a78d6; --s2: #eb6834;
+  --good: #0ca30c; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b;
+  --shadow: 0 1px 2px rgba(11,11,11,.04);
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark;
+    --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+    --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06);
+    --s1: #3987e5; --s2: #d95926; --shadow: none;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #0d0d0d; --surface: #1a1a19; --ink: #ffffff; --ink-2: #c3c2b7; --muted: #898781;
+  --grid: #2c2c2a; --axis: #383835; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06);
+  --s1: #3987e5; --s2: #d95926; --shadow: none;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+.wrap { max-width: 1320px; margin: 0 auto; padding: 20px 16px 40px; }
+.tnum { font-variant-numeric: tabular-nums; }
+
+/* Kopfzeile */
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.logo { width: 36px; height: 36px; border-radius: 10px; background: var(--s1); display: grid; place-items: center; flex: none; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+.sub { margin: 0; color: var(--ink-2); font-size: 13px; }
+.top-r { display: flex; align-items: center; gap: 8px; }
+.pill { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: var(--surface);
+  border: 1px solid var(--border); font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; }
+.dot.on { background: var(--good); box-shadow: 0 0 0 3px color-mix(in srgb, var(--good) 22%, transparent); animation: pulse 2.4s ease-in-out infinite; }
+.dot.off { background: var(--crit); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--good) 8%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .dot.on { animation: none; } }
+button, .btn { font: inherit; color: var(--ink); cursor: pointer; }
+.icon-btn { width: 32px; height: 32px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface); display: grid; place-items: center; }
+.icon-btn:hover, .seg button:hover, .btn:hover { background: var(--wash); }
+:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+
+/* Filterzeile */
+.filters { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.seg { display: inline-flex; max-width: 100%; overflow-x: auto; padding: 3px; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; }
+.seg button { border: 0; background: transparent; white-space: nowrap; padding: 5px 12px; border-radius: 7px; font-size: 13px; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--wash); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border); }
+.filters .spacer { flex: 1; }
+.btn { border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 5px 11px; font-size: 13px; text-decoration: none; color: var(--ink-2); }
+.upd { color: var(--muted); font-size: 12.5px; }
+
+/* Karten */
+.grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 12px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 16px; box-shadow: var(--shadow); min-width: 0; }
+.c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c12 { grid-column: span 12; }
+@media (max-width: 960px) { .c5, .c6, .c7 { grid-column: span 12; } }
+.card-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.card-h h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--ink); }
+.card-h p { margin: 1px 0 0; font-size: 12.5px; color: var(--ink-2); }
+.label { font-size: 12.5px; color: var(--ink-2); }
+.muted { color: var(--muted); }
+
+.tab { display: inline-flex; gap: 0; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; flex: none; }
+.tab button { border: 0; background: transparent; padding: 3px 9px; font-size: 12px; color: var(--ink-2); }
+.tab button[aria-pressed="true"] { background: var(--wash); color: var(--ink); font-weight: 600; }
+
+/* Hero */
+.hero-val { display: flex; align-items: baseline; gap: 8px; margin: 6px 0 2px; }
+.hero-val .num { font-size: 64px; line-height: 1; font-weight: 650; letter-spacing: -.03em; }
+.hero-val .unit { font-size: 18px; color: var(--ink-2); }
+.q { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
+.q svg { flex: none; }
+.meter { height: 8px; border-radius: 4px; background: var(--wash); overflow: hidden; margin: 12px 0 6px; }
+.meter > i { display: block; height: 100%; border-radius: 4px; transition: width .5s ease; }
+.meta { display: flex; flex-wrap: wrap; gap: 6px 14px; color: var(--ink-2); font-size: 13px; margin-top: 8px; }
+.meta b { color: var(--ink); font-weight: 600; }
+.bars { display: inline-flex; gap: 3px; align-items: flex-end; height: 18px; margin-left: 4px; }
+.bars i { width: 5px; background: var(--axis); border-radius: 1.5px; }
+.bars i.on { background: var(--ink); }
+
+/* Kennzahlen */
+.tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; height: 100%; }
+@media (max-width: 340px) { .tiles { grid-template-columns: 1fr; } }
+.tile { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.tile .val { font-size: 28px; font-weight: 650; letter-spacing: -.02em; line-height: 1.15; }
+.tile .val small { font-size: 13px; font-weight: 500; color: var(--ink-2); margin-left: 4px; letter-spacing: 0; }
+.tile .foot { margin-top: auto; padding-top: 6px; }
+
+/* Datenverbrauch */
+.big { font-size: 40px; font-weight: 650; letter-spacing: -.025em; line-height: 1.1; }
+.big small { font-size: 16px; color: var(--ink-2); font-weight: 500; margin-left: 4px; letter-spacing: 0; }
+.split { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 14px; }
+.split > div { border-top: 1px solid var(--grid); padding-top: 8px; }
+.key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
+.sv { font-size: 18px; font-weight: 600; }
+.note { font-size: 12.5px; color: var(--ink-2); margin-top: 10px; }
+.note.warn { color: var(--ink); }
+
+/* Diagramme */
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; overflow: visible; }
+.chart.loading svg { opacity: .55; transition: opacity .15s; }
+.chart text { font: 11.5px system-ui, -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+.chart .tick { font-variant-numeric: tabular-nums; }
+.chart .empty { fill: var(--ink-2); font-size: 13px; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; margin: 2px 0 6px; font-size: 12.5px; color: var(--ink-2); }
+.tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  padding: 8px 10px; font-size: 12.5px; min-width: 140px; box-shadow: 0 6px 24px rgba(0,0,0,.18); z-index: 5; opacity: 0; transition: opacity .08s; }
+.tip.show { opacity: 1; }
+.tip .th { color: var(--ink-2); margin-bottom: 4px; font-size: 12px; }
+.tip .tr { display: flex; align-items: center; gap: 8px; }
+.tip .tr strong { font-weight: 650; margin-left: auto; padding-left: 12px; font-variant-numeric: tabular-nums; }
+.tip .tr span.n { color: var(--ink-2); }
+.tablewrap { max-height: 260px; overflow: auto; border: 1px solid var(--border); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+th { color: var(--ink-2); font-weight: 600; font-size: 12px; position: sticky; top: 0; background: var(--surface); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+tr:last-child td { border-bottom: 0; }
+.scroll { overflow-x: auto; }
+
+/* Qualitätsverteilung */
+.qbar { display: flex; gap: 2px; height: 14px; margin: 12px 0 10px; }
+.qbar i { display: block; height: 100%; min-width: 0; }
+.qbar i:first-child { border-radius: 7px 0 0 7px; } .qbar i:last-child { border-radius: 0 7px 7px 0; }
+.qbar i:only-child { border-radius: 7px; }
+.qleg { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 14px; }
+.qleg div { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-2); }
+.qleg strong { margin-left: auto; color: var(--ink); font-variant-numeric: tabular-nums; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 16px; border-top: 1px solid var(--grid); padding-top: 12px; }
+.stats .v { font-size: 18px; font-weight: 600; }
+
+/* Ereignisse */
+.events { list-style: none; margin: 0; padding: 0; max-height: 280px; overflow: auto; }
+.events li { display: flex; gap: 12px; align-items: baseline; padding: 7px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.events li:last-child { border-bottom: 0; }
+.events time { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; width: 118px; }
+.badge { flex: none; font-size: 11.5px; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border); color: var(--ink-2); }
+footer { color: var(--muted); font-size: 12.5px; margin-top: 8px; display: flex; gap: 6px 18px; flex-wrap: wrap; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Erweiterungen: Ping, Watchdog, Prognose, Einstellungen */
+:root { --c1: #2a78d6; --c2: #eb6834; --c3: #1baf7a; --c4: #eda100; --c5: #e87ba4; --c6: #008300; --c7: #4a3aa7; --c8: #e34948; }
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) { --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767; }
+}
+:root[data-theme="dark"] { --c1: #3987e5; --c2: #d95926; --c3: #199e70; --c4: #c98500; --c5: #d55181; --c6: #008300; --c7: #9085e9; --c8: #e66767; }
+.pill-btn { cursor: pointer; font: inherit; }
+.pill-btn:hover { background: var(--wash); }
+.swatch { display: inline-block; width: 14px; height: 10px; border-radius: 2px; background: var(--crit); opacity: .4; vertical-align: middle; margin-right: 7px; }
+.badge.wd { margin-left: 6px; }
+.tag-live { color: var(--ink); font-weight: 600; }
+.meter.two { display: flex; gap: 2px; background: var(--wash); }
+.meter.two > i { border-radius: 4px; }
+.meter.two > i.rest { opacity: .35; }
+.fc { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--grid); }
+.fc .sv { font-size: 22px; }
+.fc .meter { margin: 8px 0 6px; }
+.pingstats { margin: 10px 0 8px; display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: 13px; color: var(--ink-2); }
+.pingstats b { color: var(--ink); font-weight: 600; }
+.k { display: inline-block; width: 12px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 7px; }
+
+dialog { border: 1px solid var(--border); border-radius: 16px; background: var(--surface); color: var(--ink); padding: 0; width: min(760px, calc(100vw - 24px)); max-height: calc(100vh - 24px); box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+dialog::backdrop { background: rgba(0,0,0,.5); }
+.dlg-h { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--grid); position: sticky; top: 0; background: var(--surface); z-index: 1; }
+.dlg-h h2 { margin: 0; font-size: 16px; }
+.dlg-b { padding: 6px 18px 14px; overflow-y: auto; max-height: calc(100vh - 170px); }
+.dlg-f { display: flex; gap: 8px; align-items: center; justify-content: flex-end; padding: 12px 18px; border-top: 1px solid var(--grid); position: sticky; bottom: 0; background: var(--surface); }
+.dlg-f .err { margin-right: auto; color: var(--ink); font-size: 13px; }
+.sec { margin: 16px 0 6px; font-size: 13px; font-weight: 650; }
+.hint { color: var(--ink-2); font-size: 12.5px; margin: 0 0 8px; }
+.frow { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(90px, 140px) 2fr; gap: 4px 12px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--grid); }
+.frow:last-of-type { border-bottom: 0; }
+.frow.txt { grid-template-columns: minmax(140px, .9fr) minmax(200px, 2fr); }
+.frow.txt .fh { grid-column: 1 / -1; }
+.frow .fl { font-size: 13.5px; }
+.frow .fh { font-size: 12.5px; color: var(--ink-2); }
+@media (max-width: 620px) { .frow { grid-template-columns: 1fr 110px; } .frow .fh { grid-column: 1 / -1; } }
+input[type=text], input[type=number], select { font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; min-width: 0; width: 100%; }
+input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--s1); }
+.ttable { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.ttable th, .ttable td { padding: 4px 6px; border-bottom: 0; }
+.ttable td.c { text-align: center; }
+.btn.primary { background: var(--s1); color: #fff; border-color: transparent; font-weight: 600; }
+.btn.danger { border-color: var(--crit); }
+.btn:disabled { opacity: .5; cursor: default; }
+
+/* Navigation, Seiten, Zoom */
+.tabs { display: flex; gap: 2px; padding: 3px; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; max-width: 100%; }
+.tabs a { padding: 5px 14px; border-radius: 7px; color: var(--ink-2); text-decoration: none; font-size: 13.5px; white-space: nowrap; }
+.tabs a:hover { background: var(--wash); }
+.tabs a[aria-current="page"] { background: var(--wash); color: var(--ink); font-weight: 600; box-shadow: inset 0 0 0 1px var(--border); }
+@media (max-width: 900px) { .top .tabs { order: 3; width: 100%; } .tabs a { flex: 1; text-align: center; padding: 6px 8px; } }
+@media (max-width: 480px) { .tabs a { padding: 6px 4px; font-size: 12.5px; } }
+.page[hidden] { display: none; }
+.zoombar[hidden] { display: none; }
+.zoombar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 13px; }
+.zoombar .zl { color: var(--ink-2); }
+.zoombar b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.zoombar .sp { flex: 1; }
+.zoomhint { color: var(--muted); font-size: 12.5px; margin: -6px 0 12px; }
+.btn.sm { padding: 3px 9px; font-size: 12.5px; }
+.chart .sel { fill: var(--s1); fill-opacity: .14; stroke: var(--s1); stroke-width: 1; pointer-events: none; }
+.chart rect.hit { touch-action: pan-y; }
+
+/* Auswertung */
+.metrics { display: flex; flex-wrap: wrap; gap: 8px; }
+.insights { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; }
+.insight { border: 1px solid var(--border); border-radius: 12px; padding: 12px 14px; }
+.insight .k2 { font-size: 12.5px; color: var(--ink-2); display: flex; align-items: center; gap: 6px; }
+.insight .v2 { font-size: 26px; font-weight: 650; letter-spacing: -.02em; line-height: 1.2; margin-top: 2px; }
+.insight .s2 { font-size: 12.5px; color: var(--ink-2); margin-top: 2px; }
+.heat-scale { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-2); margin-top: 8px; }
+.heat-scale i { display: block; width: 140px; height: 8px; border-radius: 4px; background: linear-gradient(90deg, color-mix(in srgb, var(--s1) 10%, var(--surface)), var(--s1)); }
+
+/* Setup */
+.rating { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.rating .word { font-size: 56px; line-height: 1.05; font-weight: 700; letter-spacing: -.03em; }
+.rating .ricon { flex: none; }
+.rating .score { font-size: 18px; color: var(--ink-2); }
+.rating .score b { color: var(--ink); font-size: 24px; }
+.scale { position: relative; display: flex; gap: 2px; margin: 26px 0 26px; height: 10px; }
+.scale i { display: block; height: 100%; }
+.scale i:first-child { border-radius: 5px 0 0 5px; } .scale i:last-child { border-radius: 0 5px 5px 0; }
+.scale .mk { position: absolute; top: -9px; width: 0; height: 0; transform: translateX(-50%); transition: left .35s ease; border-left: 7px solid transparent; border-right: 7px solid transparent; border-top: 9px solid var(--ink); }
+.scale .lb { position: absolute; top: 14px; font-size: 11.5px; color: var(--ink-2); transform: translateX(-50%); white-space: nowrap; }
+@media (max-width: 640px) { .rating .word { font-size: 42px; } .scale .lb.alt { display: none; } }
+.sm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 4px; }
+.sm-tiles .tile .val { font-size: 26px; }
+.tile .sub { font-size: 12px; color: var(--muted); }
+.banner { border: 1px solid var(--border); border-left: 4px solid var(--crit); border-radius: 10px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; background: var(--surface); }
+.banner[hidden] { display: none; }
+.spot-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px; }
+.spot-form input[type=text] { flex: 1 1 220px; width: auto; }
+.spot-form select { width: auto; }
+.prog { height: 8px; border-radius: 4px; background: var(--wash); overflow: hidden; flex: 1 1 160px; }
+.prog i { display: block; height: 100%; background: var(--s1); width: 0; transition: width .4s linear; }
+.sbar { display: inline-block; vertical-align: middle; height: 8px; border-radius: 4px; min-width: 2px; }
+.sbar-track { display: inline-block; width: 90px; height: 8px; border-radius: 4px; background: var(--wash); vertical-align: middle; margin-right: 8px; }
+.sbar-track .sbar { display: block; }
+.best-badge { margin-left: 8px; }
+details.help { margin-top: 12px; border-top: 1px solid var(--grid); padding-top: 10px; }
+details.help summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+details.help ul { margin: 8px 0 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+details.help li { margin: 3px 0; }
+.toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+
+/* Einstellungsseite */
+.setgrid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; margin-bottom: 76px; }
+.setgrid .card { grid-column: span 6; }
+.setgrid .card.wide { grid-column: span 12; }
+@media (max-width: 960px) { .setgrid .card { grid-column: span 12; } }
+.savebar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; background: var(--surface); border-top: 1px solid var(--border); padding: 10px 16px; }
+.savebar > div { max-width: 1320px; margin: 0 auto; display: flex; gap: 10px; align-items: center; justify-content: flex-end; }
+.savebar .msg { margin-right: auto; font-size: 13px; color: var(--ink-2); }
+.savebar[hidden] { display: none; }
+input[type=password], input[type=url] { font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 5px 8px; min-width: 0; width: 100%; }
+.steps { list-style: none; margin: 8px 0 0; padding: 0; font-size: 13px; }
+.steps li { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--grid); }
+.steps li:last-child { border-bottom: 0; }
+.steps svg { align-self: center; flex: none; }
+.steps .st-d { color: var(--ink-2); margin-left: auto; text-align: right; }
+.stack { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.stack input { flex: 1 1 180px; width: auto; }
+.status-line { font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="top">
+  <div class="brand">
+    <div class="logo" aria-hidden="true">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><path d="M5 18v2M10 13v7M15 9v11M20 4v16"/></svg>
+    </div>
+    <div>
+      <h1>ZTE G5TS</h1>
+      <p class="sub" id="sub">Verbinde …</p>
+    </div>
+  </div>
+  <nav class="tabs" aria-label="Seiten">
+    <a href="#/" data-p="dash">Dashboard</a>
+    <a href="#/analysis" data-p="analysis">Auswertung</a>
+    <a href="#/setup" data-p="setup">Setup</a>
+    <a href="#/settings" data-p="settings">Einstellungen</a>
+  </nav>
+  <div class="top-r">
+    <span class="pill" id="pill"><span class="dot" id="pdot"></span><span id="ptxt">Verbinde …</span></span>
+    <a class="pill pill-btn" id="wd-pill" href="#/settings" title="Ping-Monitor und Watchdog einstellen" style="text-decoration:none"><span class="dot" id="wd-dot"></span><span id="wd-txt">Watchdog</span></a>
+    <button class="icon-btn" id="logout" type="button" aria-label="Abmelden" title="Abmelden" hidden>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Darstellung wechseln" title="Hell/Dunkel">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="page" id="page-dash">
+
+<div class="filters" role="group" aria-label="Zeitraum">
+  <div class="seg" id="ranges">
+    <button type="button" data-r="1h">1 Std</button>
+    <button type="button" data-r="6h">6 Std</button>
+    <button type="button" data-r="24h">24 Std</button>
+    <button type="button" data-r="7d">7 Tage</button>
+    <button type="button" data-r="30d">30 Tage</button>
+    <button type="button" data-r="90d">90 Tage</button>
+    <button type="button" data-r="365d">1 Jahr</button>
+  </div>
+  <span class="spacer"></span>
+  <span class="upd" id="upd"></span>
+  <a class="btn" id="csv" href="#" download>Signal-CSV</a>
+  <a class="btn" id="csv2" href="#" download>Ping-CSV</a>
+</div>
+<div class="zoombar" id="zoombar" hidden role="group" aria-label="Zoom">
+  <span class="zl">Ausschnitt</span> <b id="zoom-txt"></b>
+  <span class="sp"></span>
+  <button type="button" class="btn sm" id="z-left" title="Ausschnitt nach links verschieben" aria-label="Nach links verschieben">◀</button>
+  <button type="button" class="btn sm" id="z-right" title="Ausschnitt nach rechts verschieben" aria-label="Nach rechts verschieben">▶</button>
+  <button type="button" class="btn sm" id="z-in" title="Ausschnitt halbieren">Hinein +</button>
+  <button type="button" class="btn sm" id="z-out" title="Ausschnitt verdoppeln">Heraus −</button>
+  <button type="button" class="btn sm" id="z-back" title="Zum vorherigen Ausschnitt">Zurück</button>
+  <button type="button" class="btn sm primary" id="z-reset">Zoom aufheben</button>
+</div>
+<p class="zoomhint" id="zoomhint">Zum Zoomen im Diagramm mit der Maus (oder dem Finger) einen Zeitbereich aufziehen · Doppelklick hebt den Zoom auf · Klick auf einen Tagesbalken zoomt auf den Tag.</p>
+
+<!-- Zeile A: Hero + Kennzahlen -->
+<section class="grid">
+  <div class="card c5">
+    <div class="card-h"><div><h2>Signalstärke</h2><p>RSRP der aktiven Verbindung</p></div><span class="bars" id="bars" aria-hidden="true"><i style="height:5px"></i><i style="height:9px"></i><i style="height:13px"></i><i style="height:18px"></i></span></div>
+    <div class="hero-val"><span class="num" id="h-rsrp">–</span><span class="unit">dBm</span></div>
+    <div class="q" id="h-q"></div>
+    <div class="meter" role="img" aria-label="Signalstärke im Bereich −130 bis −70 dBm" id="h-meter"><i></i></div>
+    <div class="meta" id="h-meta"></div>
+  </div>
+  <div class="c7">
+    <div class="tiles">
+      <div class="tile"><span class="label">SINR</span><span class="val tnum" id="t-snr">–</span><div class="foot"><span class="q" id="t-snr-q"></span></div></div>
+      <div class="tile"><span class="label">RSRQ</span><span class="val tnum" id="t-rsrq">–</span><div class="foot"><span class="q" id="t-rsrq-q"></span></div></div>
+      <div class="tile"><span class="label">RSSI</span><span class="val tnum" id="t-rssi">–</span><div class="foot"><span class="label" id="t-rssi-n">Gesamtempfang</span></div></div>
+      <div class="tile"><span class="label">Funkzellen</span><span class="val tnum" id="t-cells">–</span><div class="foot"><span class="label" id="t-cells-n"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Zeile B: RSRP -->
+<section class="grid">
+  <div class="card c12" id="card-rsrp"></div>
+</section>
+
+<!-- Latenz & Erreichbarkeit -->
+<section class="grid">
+  <div class="card c12" id="card-ping"></div>
+</section>
+
+<!-- Zeile C: SINR + RSRQ -->
+<section class="grid">
+  <div class="card c6" id="card-snr"></div>
+  <div class="card c6" id="card-rsrq"></div>
+</section>
+
+<!-- Zeile D: Datenverbrauch -->
+<section class="grid">
+  <div class="card c5" id="card-usage">
+    <div class="card-h"><div><h2>Datenverbrauch</h2><p id="u-period">Abrechnungszeitraum</p></div></div>
+    <div class="big tnum" id="u-total">–</div>
+    <div class="meter" id="u-meter" hidden><i></i></div>
+    <div class="note" id="u-limit"></div>
+    <div class="split">
+      <div><span class="label"><span class="key" style="background:var(--s1)"></span>Download</span><div class="sv tnum" id="u-rx">–</div></div>
+      <div><span class="label"><span class="key" style="background:var(--s2)"></span>Upload</span><div class="sv tnum" id="u-tx">–</div></div>
+      <div><span class="label">Heute</span><div class="sv tnum" id="u-today">–</div></div>
+      <div><span class="label" id="u-range-l">Im Zeitraum</span><div class="sv tnum" id="u-range">–</div></div>
+    </div>
+    <div class="note" id="u-note"></div>
+    <div class="fc" id="u-fc" hidden>
+      <span class="label">Prognose bis Periodenende (<span id="fc-end"></span>)</span>
+      <div class="sv tnum" id="fc-val">–</div>
+      <div class="meter two" id="fc-bar" role="img" aria-label="Bisheriger Verbrauch und Prognose"></div>
+      <div class="note" id="fc-note" style="margin-top:4px"></div>
+      <div class="note muted" id="fc-lin" style="margin-top:2px"></div>
+    </div>
+  </div>
+  <div class="card c7" id="card-daily"></div>
+</section>
+
+<!-- Zeile E: Durchsatz -->
+<section class="grid">
+  <div class="card c12" id="card-speed"></div>
+</section>
+
+<!-- Zeile F: Zelle + Qualität -->
+<section class="grid">
+  <div class="card c7">
+    <div class="card-h"><div><h2>Funkzellen &amp; Trägeraggregation</h2><p>Primärzelle und zusätzliche Träger (Carrier Aggregation)</p></div></div>
+    <div class="scroll"><table id="cells"><thead><tr><th>Rolle</th><th>Band</th><th class="num">PCI</th><th class="num">ARFCN</th><th class="num">Bandbreite</th><th class="num">RSRP</th><th class="num">RSRQ</th><th class="num">SINR</th></tr></thead><tbody></tbody></table></div>
+    <div class="note" id="cell-note"></div>
+  </div>
+  <div class="card c5">
+    <div class="card-h"><div><h2>Signalqualität im Zeitraum</h2><p id="q-sub">Anteil der Messzeit</p></div></div>
+    <div class="qbar" id="qbar" role="img" aria-label="Verteilung der Signalqualität"></div>
+    <div class="qleg" id="qleg"></div>
+    <div class="stats">
+      <div><span class="label">Ø RSRP</span><div class="v tnum" id="s-avg">–</div></div>
+      <div><span class="label">Bester</span><div class="v tnum" id="s-max">–</div></div>
+      <div><span class="label">Schlechtester</span><div class="v tnum" id="s-min">–</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Zeile G: Ereignisse -->
+<section class="grid">
+  <div class="card c12">
+    <div class="card-h"><div><h2>Ereignisse</h2><p>Zell-/Bandwechsel, Verbindungsabbrüche</p></div></div>
+    <ul class="events" id="events"></ul>
+  </div>
+</section>
+
+<footer id="foot"></footer>
+</main>
+
+<!-- Auswertung nach Tageszeit -->
+<main class="page" id="page-analysis" hidden>
+  <div class="filters" role="group" aria-label="Auswertung">
+    <div class="seg" id="a-ranges" aria-label="Zeitraum">
+      <button type="button" data-r="7d">7 Tage</button><button type="button" data-r="30d">30 Tage</button>
+      <button type="button" data-r="90d">90 Tage</button><button type="button" data-r="365d">1 Jahr</button>
+    </div>
+    <div class="seg" id="a-metrics" aria-label="Messgröße"></div>
+    <span class="spacer"></span>
+    <span class="upd" id="a-info"></span>
+  </div>
+  <section class="grid"><div class="card c12" id="a-insights"></div></section>
+  <section class="grid"><div class="card c12" id="a-hour"></div></section>
+  <section class="grid"><div class="card c12" id="a-heat"></div></section>
+</main>
+
+<!-- Setup: Router-Standort finden -->
+<main class="page" id="page-setup" hidden>
+  <div class="filters" role="group" aria-label="Messung">
+    <div class="seg" id="s-window" aria-label="Diagrammfenster">
+      <button type="button" data-v="60">1 Min</button><button type="button" data-v="120">2 Min</button><button type="button" data-v="300">5 Min</button>
+    </div>
+    <div class="seg" id="s-smooth" aria-label="Glättung der Anzeige">
+      <button type="button" data-v="0">Roh</button><button type="button" data-v="5">Ø 5 s</button><button type="button" data-v="10">Ø 10 s</button><button type="button" data-v="30">Ø 30 s</button>
+    </div>
+    <div class="seg" id="s-rate" aria-label="Messtakt">
+      <button type="button" data-v="500">0,5 s</button><button type="button" data-v="1000">1 s</button><button type="button" data-v="2000">2 s</button>
+    </div>
+    <button type="button" class="btn" id="s-sound" aria-pressed="false" title="Ton je nach Empfang: höher = besser">🔈 Signalton</button>
+    <label class="toggle"><input type="checkbox" id="s-wake"> Bildschirm anlassen</label>
+    <span class="spacer"></span>
+    <span class="upd" id="s-info"></span>
+  </div>
+  <div class="banner" id="s-banner" hidden role="alert"></div>
+  <section class="grid">
+    <div class="card c12" id="s-hero">
+      <div class="card-h"><div><h2>Empfang am aktuellen Standort</h2><p id="s-sub">Warte auf Messwerte …</p></div></div>
+      <div class="rating"><span class="ricon" id="s-ricon"></span><span class="word" id="s-word">–</span><span class="score" id="s-score"></span></div>
+      <div class="scale" id="s-scale" role="img" aria-label="Bewertungsskala"></div>
+      <div class="note" id="s-limit" style="margin-top:0"></div>
+      <div class="sm-tiles">
+        <div class="tile"><span class="label">Signalstärke (RSRP)</span><span class="val tnum" id="s-rsrp-v">–</span><div class="foot"><span class="q" id="s-rsrp-q"></span></div></div>
+        <div class="tile"><span class="label">Signalrauschabstand (SINR)</span><span class="val tnum" id="s-snr-v">–</span><div class="foot"><span class="q" id="s-snr-q"></span></div></div>
+        <div class="tile"><span class="label">Signalqualität (RSRQ)</span><span class="val tnum" id="s-rsrq-v">–</span><div class="foot"><span class="q" id="s-rsrq-q"></span></div></div>
+        <div class="tile"><span class="label">Stabilität</span><span class="val tnum" id="s-stab-v">–</span><div class="foot"><span class="q" id="s-stab-q"></span></div></div>
+      </div>
+      <div class="meta" id="s-meta"></div>
+      <details class="help">
+        <summary>So wird bewertet – und Tipps zur Aufstellung</summary>
+        <ul>
+          <li>Die Bewertung (0–100 Punkte) setzt sich zusammen aus Signalstärke RSRP (40 %), Signalrauschabstand SINR (45 %) und Signalqualität RSRQ (15 %). Der SINR zählt am meisten, weil er die erreichbare Datenrate am stärksten bestimmt.</li>
+          <li>Nach dem Umstellen des Routers 10–20 Sekunden warten, bis sich die Werte beruhigt haben; die Anzeige „Ø 10 s“ glättet Ausreißer.</li>
+          <li>Höhere Standorte und freie Sicht Richtung Mobilfunkmast helfen. Fensternähe ist meist besser als Raummitte; 5G auf n78 (3,5 GHz) wird von Wänden stärker gedämpft als LTE.</li>
+          <li>Metall, Spiegel, Heizkörper und viele andere Funkgeräte in unmittelbarer Nähe vermeiden. Schon wenige Zentimeter oder ein Drehen um einige Grad können spürbar etwas ändern.</li>
+          <li>Ein Standort mit etwas schwächerer RSRP, aber deutlich besserem SINR und ruhigem Verlauf ist oft der bessere.</li>
+        </ul>
+      </details>
+    </div>
+  </section>
+  <section class="grid">
+    <div class="card c6" id="s-c-rsrp"></div>
+    <div class="card c6" id="s-c-snr"></div>
+  </section>
+  <section class="grid">
+    <div class="card c12" id="s-spots">
+      <div class="card-h"><div><h2>Standortvergleich</h2><p>Router an einen Ort stellen, kurz warten, dann messen. Danach den nächsten Ort ausprobieren – der beste steht oben.</p></div></div>
+      <div class="spot-form">
+        <input type="text" id="sp-name" maxlength="60" placeholder="Name des Standorts, z. B. Fensterbank Süd" aria-label="Name des Standorts">
+        <select id="sp-dur" aria-label="Messdauer"><option value="15">15 s</option><option value="30" selected>30 s</option><option value="60">60 s</option><option value="120">2 min</option></select>
+        <button type="button" class="btn primary" id="sp-go">Messung starten</button>
+        <button type="button" class="btn" id="sp-stop" hidden>Abbrechen</button>
+        <div class="prog" id="sp-prog" hidden><i></i></div>
+        <span class="label tnum" id="sp-left"></span>
+      </div>
+      <div class="scroll" id="sp-list"></div>
+    </div>
+  </section>
+</main>
+
+<!-- Einstellungen -->
+<main class="page" id="page-settings" hidden>
+  <div class="setgrid" id="set-body"></div>
+</main>
+</div>
+
+<div class="savebar" id="savebar" hidden><div><span class="msg" id="save-msg" role="status"></span><button type="button" class="btn" id="save-cancel">Verwerfen</button><button type="button" class="btn primary" id="save-btn">Speichern</button></div></div>
+
+
+
+<script>
+"use strict";
+/* ---------- Helfer ---------- */
+const $ = (s, el = document) => el.querySelector(s);
+const NS = "http://www.w3.org/2000/svg";
+const svgEl = (name, attrs = {}, parent) => {
+  const e = document.createElementNS(NS, name);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+const nfs = {};
+const fmt = (v, d = 0) => {
+  if (v == null || Number.isNaN(v)) return "–";
+  const nf = nfs[d] || (nfs[d] = new Intl.NumberFormat("de-DE", { minimumFractionDigits: d, maximumFractionDigits: d }));
+  return nf.format(v).replace("-", "−");
+};
+const fmtBytes = (b, d) => {
+  if (b == null) return ["–", ""];
+  const u = ["B", "kB", "MB", "GB", "TB"]; let i = 0, v = b;
+  while (Math.abs(v) >= 1000 && i < u.length - 1) { v /= 1000; i++; }
+  return [fmt(v, d ?? (i >= 3 ? (v < 10 ? 2 : v < 100 ? 1 : 0) : i === 2 ? 1 : 0)), u[i]];
+};
+const bytesStr = (b, d) => fmtBytes(b, d).join(" ");
+const mbit = (bps) => bps == null ? null : bps * 8 / 1e6;
+const two = (n) => String(n).padStart(2, "0");
+const dateFmt = new Intl.DateTimeFormat("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+const timeFmt = (t) => `${two(new Date(t * 1000).getHours())}:${two(new Date(t * 1000).getMinutes())}`;
+const dayFmt = (t) => `${two(new Date(t * 1000).getDate())}.${two(new Date(t * 1000).getMonth() + 1)}.`;
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function needLogin() { location.href = "/login"; return new Promise(() => {}); }
+async function getJSON(url) {
+  const r = await fetch(url, { cache: "no-store" });
+  if (r.status === 401) return needLogin();
+  if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+  return r.json();
+}
+async function api(method, url, body) {
+  const r = await fetch(url, { method, cache: "no-store", headers: { "Content-Type": "application/json", "X-Requested-With": "zte-dash" }, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 && !url.startsWith("/api/login") && !url.startsWith("/api/security")) return needLogin();
+  if (!r.ok) throw new Error(j.error || r.status);
+  return j;
+}
+
+/* ---------- Qualitätsstufen (Status-Farben + Icon + Label) ---------- */
+const LEVELS = [
+  { id: "good", label: "Gut", color: "var(--good)" },
+  { id: "warn", label: "Mittel", color: "var(--warn)" },
+  { id: "serious", label: "Schwach", color: "var(--serious)" },
+  { id: "crit", label: "Sehr schwach", color: "var(--crit)" },
+];
+const ICONS = {
+  good: '<circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="M4 7.2l2.1 2.1L10.2 5" stroke="var(--surface)" stroke-width="1.7" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+  warn: '<path d="M7 1L13.2 12H0.8z" fill="currentColor" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><path d="M7 5.2v3.2M7 10v.1" stroke="var(--surface)" stroke-width="1.5" stroke-linecap="round"/>',
+  serious: '<path d="M7 .8L13.2 7 7 13.2.8 7z" fill="currentColor"/><path d="M7 4v3.4M7 9.2v.1" stroke="var(--surface)" stroke-width="1.5" stroke-linecap="round"/>',
+  crit: '<circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="M4.6 4.6l4.8 4.8M9.4 4.6L4.6 9.4" stroke="var(--surface)" stroke-width="1.7" stroke-linecap="round"/>',
+};
+function levelIcon(level, size = 14) {
+  const s = svgEl("svg", { width: size, height: size, viewBox: "0 0 14 14", "aria-hidden": "true" });
+  s.style.color = level.color; s.innerHTML = ICONS[level.id]; return s;
+}
+const lvl = (i) => LEVELS[i];
+const rsrpLevel = (v) => v == null ? null : lvl(v >= -90 ? 0 : v >= -100 ? 1 : v >= -110 ? 2 : 3);
+const snrLevel = (v) => v == null ? null : lvl(v >= 13 ? 0 : v >= 5 ? 1 : v >= 0 ? 2 : 3);
+const rsrqLevel = (v) => v == null ? null : lvl(v >= -10 ? 0 : v >= -14 ? 1 : v >= -18 ? 2 : 3);
+function setQ(node, level) {
+  node.replaceChildren();
+  if (!level) { node.textContent = "–"; node.className = "label"; return; }
+  node.className = "q";
+  node.append(levelIcon(level), document.createTextNode(level.label));
+}
+
+/* ---------- Zeitachse ---------- */
+const STEPS = [5, 10, 15, 30, 60, 300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800];
+function timeTicks(t0, t1, targetCount) {
+  const span = t1 - t0;
+  const step = STEPS.find((s) => span / s <= targetCount);
+  if (!step) {                       // > ~3 Monate: Ticks auf Monatsanfänge (alle n Monate)
+    const months = Math.ceil(span / 2629800 / targetCount);
+    const d = new Date(t0 * 1000); d.setDate(1); d.setHours(0, 0, 0, 0);
+    const out = [];
+    for (; d.getTime() / 1000 <= t1; d.setMonth(d.getMonth() + months)) { const t = d.getTime() / 1000; if (t >= t0) out.push(t); }
+    return { ticks: out, step: "month" };
+  }
+  const off = -new Date(t0 * 1000).getTimezoneOffset() * 60;
+  const out = [];
+  for (let t = Math.ceil((t0 + off) / step) * step - off; t <= t1; t += step) out.push(t);
+  return { ticks: out, step };
+}
+const tickLabel = (t, step, span = 0) => {
+  if (step === "month") { const d = new Date(t * 1000); return d.toLocaleDateString("de-DE", { month: "short", ...(d.getMonth() === 0 ? { year: "2-digit" } : {}) }).replace(".", ""); }
+  if (step >= 86400) return dayFmt(t);
+  const d = new Date(t * 1000);
+  if (span > 86400 && d.getHours() === 0 && d.getMinutes() === 0) return dayFmt(t);      // Mitternacht = Datum
+  return step < 60 ? `${timeFmt(t)}:${two(d.getSeconds())}` : timeFmt(t);
+};
+
+function niceScale(min, max, n = 4) {
+  if (!(max > min)) { min -= 1; max += 1; }
+  const raw = (max - min) / n, p = 10 ** Math.floor(Math.log10(raw)), m = raw / p;
+  const step = (m < 1.5 ? 1 : m < 3 ? 2 : m < 7 ? 5 : 10) * p;
+  const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
+  const ticks = []; for (let v = lo; v <= hi + step / 2; v += step) ticks.push(+v.toFixed(10));
+  return { lo, hi, ticks, step };
+}
+const decimalsFor = (step) => step >= 1 ? 0 : step >= 0.1 ? 1 : 2;
+
+/* ---------- Tooltip ---------- */
+function makeTip(host) {
+  const tip = el("div", "tip"); tip.setAttribute("role", "status"); host.appendChild(tip);
+  return {
+    show(x, y, head, rows) {
+      tip.replaceChildren(); tip.appendChild(el("div", "th", head));
+      for (const r of rows) {
+        const row = el("div", "tr");
+        if (r.color) { const k = el("span", "key"); k.style.background = r.color; k.style.margin = "0"; row.appendChild(k); }
+        row.appendChild(el("span", "n", r.name)); row.appendChild(el("strong", "", r.value)); tip.appendChild(row);
+      }
+      tip.classList.add("show");
+      const w = tip.offsetWidth, hw = host.clientWidth;
+      let left = x + 14; if (left + w > hw) left = x - w - 14; if (left < 0) left = 4;
+      tip.style.left = left + "px"; tip.style.top = Math.max(0, y) + "px";
+    },
+    hide() { tip.classList.remove("show"); },
+  };
+}
+
+/* ---------- Liniendiagramm ---------- */
+const MARK_NAME = { reconnect: "Verbindungs-Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus: Neustart" };
+class LineChart {
+  constructor(host, o) {
+    this.host = host; this.o = Object.assign({ height: 220, unit: "", decimals: 0 }, o);
+    this.svg = svgEl("svg", { role: "img", "aria-label": o.aria || "" }); host.appendChild(this.svg);
+    this.tip = makeTip(host); this.idx = null; this.data = null;
+    new ResizeObserver(() => this.draw()).observe(host);
+  }
+  set(data) { this.data = data; this.draw(); }
+  valid(i) { return this.data.series.some((s) => s.values[i] != null || (s.extra && s.extra(i))); }
+  draw() {
+    const d = this.data, o = this.o, svg = this.svg;
+    const W = Math.max(280, this.host.clientWidth), H = o.height;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.replaceChildren();
+    if (!d) return;
+    const m = { l: 46, r: 14, t: 10, b: 24 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const vals = d.series.flatMap((s) => s.values.filter((v) => v != null));
+    if (!vals.length) {
+      const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg);
+      t.textContent = "Noch keine Daten im gewählten Zeitraum"; return;
+    }
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (o.minSpan && hi - lo < o.minSpan) { const c = (hi + lo) / 2; lo = c - o.minSpan / 2; hi = c + o.minSpan / 2; }
+    const pad = (hi - lo) * 0.06; lo -= pad; hi += pad;
+    if (o.floor != null) lo = Math.max(lo, o.floor);
+    const sc = niceScale(lo, hi, 4); if (o.floor != null && sc.lo < o.floor) sc.lo = o.floor;
+    const X = (t) => m.l + (t - d.since) / (d.until - d.since) * pw;
+    const Y = (v) => m.t + ph - (v - sc.lo) / (sc.hi - sc.lo) * ph;
+    this.X = X; this.m = m; this.ph = ph; this.pw = pw; this.Y = Y;
+    const dec = decimalsFor(sc.step);
+    // Raster
+    for (const v of sc.ticks) {
+      if (v < sc.lo - 1e-9 || v > sc.hi + 1e-9) continue;
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)", "stroke-width": 1 }, svg);
+      const t = svgEl("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end", class: "tick" }, svg); t.textContent = fmt(v, dec);
+    }
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: m.t + ph, y2: m.t + ph, stroke: "var(--axis)", "stroke-width": 1 }, svg);
+    const { ticks, step } = timeTicks(d.since, d.until, Math.max(3, Math.floor(pw / 90)));
+    for (const t of ticks) {
+      const tx = svgEl("text", { x: X(t), y: H - 6, "text-anchor": "middle", class: "tick" }, svg); tx.textContent = tickLabel(t, step, d.until - d.since);
+    }
+    // Ausfälle (Bänder) und Neustarts (Linie + Raute) - hinter den Datenlinien
+    const mk = d.marks || { reconnects: [], outages: [] };
+    for (const out of mk.outages) {
+      const a = Math.max(out.start, d.since), b = Math.min(out.end ?? d.until, d.until); if (b < a) continue;
+      svgEl("rect", { x: X(a), y: m.t, width: Math.max(4, X(b) - X(a)), height: ph, style: "fill:var(--crit);fill-opacity:.18" }, svg);
+    }
+    const rec = mk.reconnects.filter((r) => r.ts >= d.since && r.ts <= d.until);
+    for (const r of rec) svgEl("line", { x1: X(r.ts), x2: X(r.ts), y1: m.t, y2: m.t + ph, stroke: "var(--ink-2)", "stroke-width": 1 }, svg);
+    // Schwellen
+    for (const th of o.thresholds || []) {
+      if (th.v <= sc.lo || th.v >= sc.hi) continue;
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(th.v), y2: Y(th.v), stroke: "var(--axis)", "stroke-width": 1 }, svg);
+      const t = svgEl("text", { x: W - m.r - 4, y: Y(th.v) - 4, "text-anchor": "end", style: "paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round" }, svg); t.textContent = th.label;
+    }
+    // Serien
+    const gap = d.bucket * 2.6;
+    d.series.forEach((s) => {
+      const segs = []; let cur = [];
+      d.t.forEach((t, i) => {
+        const v = s.values[i];
+        if (v == null || (cur.length && t - cur[cur.length - 1][2] > gap)) { if (cur.length) segs.push(cur); cur = []; }
+        if (v != null) cur.push([X(t), Y(v), t]);
+      });
+      if (cur.length) segs.push(cur);
+      for (const seg of segs) {
+        if (seg.length === 1) { svgEl("circle", { cx: seg[0][0], cy: seg[0][1], r: 2, style: `fill:${s.color}` }, svg); continue; }
+        const path = "M" + seg.map((p) => p[0].toFixed(1) + " " + p[1].toFixed(1)).join("L");
+        if (o.area && d.series.length === 1) {
+          svgEl("path", { d: `${path}L${seg[seg.length - 1][0].toFixed(1)} ${m.t + ph}L${seg[0][0].toFixed(1)} ${m.t + ph}Z`, style: `fill:${s.color};fill-opacity:.10` }, svg);
+        }
+        svgEl("path", { d: path, fill: "none", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", style: `stroke:${s.color}` }, svg);
+      }
+      const last = segs.length ? segs[segs.length - 1] : null;
+      if (last) {
+        const p = last[last.length - 1];
+        svgEl("circle", { cx: p[0], cy: p[1], r: 4, "stroke-width": 2, style: `fill:${s.color};stroke:var(--surface)` }, svg);
+      }
+    });
+    for (const r of rec) {   // Raute oben, mit Oberflächenring
+      const x = X(r.ts), y = m.t + 6;
+      svgEl("path", { d: `M${x} ${y - 6}L${x + 6} ${y}L${x} ${y + 6}L${x - 6} ${y}Z`, "stroke-width": 2, "stroke-linejoin": "round", style: `fill:${r.kind === "reconnect_fail" ? "var(--crit)" : "var(--ink)"};stroke:var(--surface)` }, svg);
+    }
+    // Hover-Ebene
+    this.cross = svgEl("line", { y1: m.t, y2: m.t + ph, stroke: "var(--ink-2)", "stroke-width": 1, opacity: 0 }, svg);
+    this.dots = svgEl("g", {}, svg);
+    const hit = svgEl("rect", { x: m.l, y: m.t, width: pw, height: ph, fill: "transparent", tabindex: 0, class: "hit" }, svg);
+    hit.style.cursor = "crosshair"; hit.style.outline = "none";
+    const px = (e) => { const r = svg.getBoundingClientRect(); return Math.max(m.l, Math.min(m.l + pw, (e.clientX - r.left) * (W / r.width))); };
+    const tOf = (x) => d.since + (x - m.l) / pw * (d.until - d.since);
+    let drag = null, sel = null;
+    hit.addEventListener("pointerdown", (e) => {              // Zeitbereich aufziehen = hineinzoomen
+      if (!o.onZoom || e.button > 0) return;
+      drag = { x0: px(e), x1: px(e) }; this.clear();
+      sel = svgEl("rect", { class: "sel", x: drag.x0, y: m.t, width: 0, height: ph }, svg);
+      try { hit.setPointerCapture(e.pointerId); } catch {}
+    });
+    hit.addEventListener("pointermove", (e) => {
+      if (drag) { drag.x1 = px(e); sel.setAttribute("x", Math.min(drag.x0, drag.x1)); sel.setAttribute("width", Math.abs(drag.x1 - drag.x0)); return; }
+      this.at(tOf(px(e)));
+    });
+    const endDrag = (apply) => {
+      if (!drag) return; const dr = drag; drag = null; sel && sel.remove(); sel = null;
+      if (apply && Math.abs(dr.x1 - dr.x0) >= 8) o.onZoom(Math.floor(tOf(Math.min(dr.x0, dr.x1))), Math.ceil(tOf(Math.max(dr.x0, dr.x1))));
+    };
+    hit.addEventListener("pointerup", () => endDrag(true));
+    hit.addEventListener("pointercancel", () => endDrag(false));
+    hit.addEventListener("dblclick", () => o.onReset && o.onReset());
+    hit.addEventListener("pointerleave", () => { if (!drag) this.clear(); });
+    hit.addEventListener("blur", () => this.clear());
+    hit.addEventListener("focus", () => { this.idx = this.idx ?? d.t.length - 1; this.show(this.idx); });
+    hit.addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault(); let i = this.idx ?? d.t.length - 1; const dir = e.key === "ArrowLeft" ? -1 : 1;
+      do { i += dir; } while (i >= 0 && i < d.t.length && !this.valid(i));
+      if (i >= 0 && i < d.t.length) this.show(i);
+    });
+    if (this.idx != null && this.idx < d.t.length && document.activeElement === hit) this.show(this.idx);
+  }
+  at(t) {
+    const ts = this.data.t; if (!ts.length) return; let lo = 0, hi = ts.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (ts[mid] < t) lo = mid + 1; else hi = mid; }
+    let i = lo; if (i > 0 && Math.abs(ts[i - 1] - t) < Math.abs(ts[i] - t)) i--;
+    if (!this.valid(i)) { let j = i; while (j > 0 && !this.valid(j)) j--; let k = i; while (k < ts.length - 1 && !this.valid(k)) k++; i = this.valid(j) && (!this.valid(k) || i - j <= k - i) ? j : k; }
+    this.show(i);
+  }
+  show(i) {
+    const d = this.data, x = this.X(d.t[i]); this.idx = i;
+    this.cross.setAttribute("x1", x); this.cross.setAttribute("x2", x); this.cross.setAttribute("opacity", 1);
+    this.dots.replaceChildren();
+    const rows = [];
+    for (const s of d.series) {
+      const v = s.values[i], ex = s.extra ? s.extra(i) : "";
+      if (v == null) { if (ex) rows.push({ color: s.color, name: s.label, value: ex }); continue; }
+      svgEl("circle", { cx: x, cy: this.Y(v), r: 4, "stroke-width": 2, style: `fill:${s.color};stroke:var(--surface)` }, this.dots);
+      rows.push({ color: s.color, name: s.label, value: `${fmt(v, this.o.decimals)} ${this.o.unit}` + (ex ? ` · ${ex}` : "") });
+    }
+    const t = d.t[i], w = Math.max(d.bucket, 10), mk = d.marks || { reconnects: [], outages: [] };
+    for (const r of mk.reconnects) if (Math.abs(r.ts - t) <= w) rows.push({ name: MARK_NAME[r.kind] || r.kind, value: timeFmt(r.ts) });
+    if (mk.outages.some((o) => o.start <= t + w / 2 && (o.end ?? d.until) >= t - w / 2)) rows.push({ name: "Ziele nicht erreichbar", value: "" });
+    this.tip.show(x, this.m.t, (this.o.headFmt || ((u) => dateFmt.format(new Date(u * 1000))))(t), rows);
+  }
+  clear() { if (this.cross) this.cross.setAttribute("opacity", 0); this.dots && this.dots.replaceChildren(); this.tip.hide(); }
+}
+
+/* ---------- Balkendiagramm (gestapelt, Tage) ---------- */
+class BarChart {
+  constructor(host, o) {
+    this.host = host; this.o = Object.assign({ height: 240 }, o);
+    this.svg = svgEl("svg", { role: "img", "aria-label": o.aria || "" }); host.appendChild(this.svg);
+    this.tip = makeTip(host); this.data = null;
+    new ResizeObserver(() => this.draw()).observe(host);
+  }
+  set(days) { this.data = days; this.draw(); }
+  draw() {
+    const days = this.data, svg = this.svg, H = this.o.height;
+    const W = Math.max(280, this.host.clientWidth);
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.replaceChildren();
+    if (!days) return;
+    const m = { l: 46, r: 8, t: 10, b: 24 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
+    const maxV = Math.max(1, ...days.map((d) => d.rx + d.tx)) / 1e9;
+    const sc = niceScale(0, maxV, 4);
+    const Y = (gb) => m.t + ph - gb / sc.hi * ph;
+    for (const v of sc.ticks) {
+      svgEl("line", { x1: m.l, x2: W - m.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, svg);
+      const t = svgEl("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end", class: "tick" }, svg); t.textContent = fmt(v, decimalsFor(sc.step));
+    }
+    svgEl("line", { x1: m.l, x2: W - m.r, y1: m.t + ph, y2: m.t + ph, stroke: "var(--axis)" }, svg);
+    const n = days.length, slot = pw / n, bw = Math.min(24, Math.max(1.5, slot * 0.7));
+    const every = Math.max(1, Math.ceil(46 / slot));
+    const bars = [];
+    days.forEach((d, i) => {
+      const cx = m.l + slot * (i + 0.5), x = cx - bw / 2, g = svgEl("g", {}, svg);
+      const hRx = d.rx / 1e9 / sc.hi * ph, hTx = d.tx / 1e9 / sc.hi * ph;
+      const base = m.t + ph, top = hTx > 0 ? "tx" : "rx";
+      const mk = (y, h, color, round) => {
+        if (h < 0.5) return;
+        const r = round ? Math.min(4, h, bw / 2) : 0;
+        const p = round ? `M${x} ${y + h}V${y + r}Q${x} ${y} ${x + r} ${y}H${x + bw - r}Q${x + bw} ${y} ${x + bw} ${y + r}V${y + h}Z` : `M${x} ${y}H${x + bw}V${y + h}H${x}Z`;
+        svgEl("path", { d: p, style: `fill:${color}` }, g);
+      };
+      const gapPx = hRx > 0 && hTx > 0 ? 2 : 0;
+      mk(base - hRx, hRx, "var(--s1)", top === "rx");
+      mk(base - hRx - hTx, Math.max(0, hTx - gapPx), "var(--s2)", true);
+      if (hTx > 0 && hRx > 0) { /* die Lücke entsteht durch die um 2 px gekürzte obere Fläche */ }
+      const label = `${dayFmt(Date.parse(d.day + "T12:00:00") / 1000)}: ${bytesStr(d.rx + d.tx)}`;
+      const hit = svgEl("rect", { x: m.l + slot * i, y: m.t, width: slot, height: ph, fill: "transparent", tabindex: 0, "aria-label": label }, svg);
+      const on = () => {
+        g.parentNode.querySelectorAll("g").forEach((o) => (o.style.opacity = o === g ? 1 : 0.45));
+        this.tip.show(cx, m.t, new Date(d.day + "T12:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }), [
+          { color: "var(--s1)", name: "Download", value: bytesStr(d.rx) },
+          { color: "var(--s2)", name: "Upload", value: bytesStr(d.tx) },
+          { name: "Gesamt", value: bytesStr(d.rx + d.tx) }]);
+      };
+      const off = () => { svg.querySelectorAll("g").forEach((o) => (o.style.opacity = 1)); this.tip.hide(); };
+      hit.addEventListener("pointerenter", on); hit.addEventListener("pointermove", on); hit.addEventListener("pointerleave", off);
+      hit.addEventListener("focus", on); hit.addEventListener("blur", off); hit.style.outline = "none";
+      if (this.o.onPick) { hit.style.cursor = "pointer"; hit.addEventListener("click", () => this.o.onPick(d.day)); }
+      if ((n - 1 - i) % every === 0) {
+        const t = svgEl("text", { x: cx, y: H - 6, "text-anchor": "middle", class: "tick" }, svg);
+        t.textContent = dayFmt(Date.parse(d.day + "T12:00:00") / 1000);
+      }
+    });
+    if (days.every((d) => d.rx + d.tx === 0)) {
+      const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg);
+      t.textContent = "Noch kein Datenverbrauch aufgezeichnet";
+    }
+  }
+}
+
+/* ---------- Diagramm-Karte (Titel, Legende, Diagramm/Tabelle) ---------- */
+function chartCard(root, { title, sub, legend, marks }) {
+  const head = el("div", "card-h"); const tt = el("div"); tt.append(el("h2", "", title), el("p", "", sub)); head.appendChild(tt);
+  const tab = el("div", "tab"); tab.setAttribute("role", "group"); tab.setAttribute("aria-label", "Ansicht");
+  const b1 = el("button", "", "Diagramm"), b2 = el("button", "", "Tabelle");
+  b1.type = b2.type = "button"; tab.append(b1, b2); head.appendChild(tab);
+  const lg = el("div", "legend");
+  const chart = el("div", "chart"), tw = el("div", "tablewrap"); tw.hidden = true;
+  root.append(head, lg, chart, tw);
+  const state = { view: "chart", n: 0, marks: false };
+  const renderLegend = () => {
+    lg.replaceChildren();
+    for (const l of state.items || []) { const s = el("span"); const k = el("span", "key"); k.style.background = l.color; s.append(k, document.createTextNode(l.label)); lg.appendChild(s); }
+    if (marks && state.marks) {
+      const a = el("span"); const d = svgEl("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" });
+      svgEl("path", { d: "M7 1L13 7L7 13L1 7Z", style: "fill:var(--ink)" }, d); a.append(d, document.createTextNode("Neustart der Verbindung"));
+      const b = el("span"); const r = el("span", "swatch"); b.append(r, document.createTextNode("Ziele nicht erreichbar")); lg.append(a, b);
+    }
+    lg.hidden = !((state.items || []).length > 1 || (marks && state.marks));
+  };
+  const set = (v) => { state.view = v; b1.setAttribute("aria-pressed", v === "chart"); b2.setAttribute("aria-pressed", v === "table"); chart.hidden = v !== "chart"; tw.hidden = v !== "table"; if (v === "chart") chart.dispatchEvent(new Event("shown")); };
+  b1.onclick = () => set("chart"); b2.onclick = () => set("table"); set("chart");
+  state.items = legend || []; renderLegend();
+  return { root, chart, setLegend(items, hasMarks) { state.items = items; state.marks = !!hasMarks; renderLegend(); },
+    fillTable(cols, rows) {
+    const t = el("table"), th = el("thead"), tr = el("tr");
+    cols.forEach((c, i) => { const h = el("th", i ? "num" : "", c); tr.appendChild(h); }); th.appendChild(tr); t.appendChild(th);
+    const tb = el("tbody");
+    for (const r of rows) { const row = el("tr"); r.forEach((c, i) => row.appendChild(el("td", i ? "num" : "", c))); tb.appendChild(row); }
+    t.appendChild(tb); tw.replaceChildren(t);
+  }, loading(on) { chart.classList.toggle("loading", on); } };
+}
+
+/* ---------- Aufbau ---------- */
+const S1 = "var(--s1)", S2 = "var(--s2)";
+const LEG_NR = [{ label: "5G NR", color: S1 }, { label: "4G LTE", color: S2 }];
+const LEG_DU = [{ label: "Download", color: S1 }, { label: "Upload", color: S2 }];
+const cards = {
+  rsrp: chartCard($("#card-rsrp"), { title: "Signalstärke (RSRP)", sub: "Höher ist besser · −90 dBm und mehr gilt als gut", legend: LEG_NR, marks: true }),
+  ping: chartCard($("#card-ping"), { title: "Latenz & Erreichbarkeit", sub: "Antwortzeit je Ziel (Mittelwert je Zeitfenster) · Ausfälle rot hinterlegt, Neustarts als Raute", legend: [], marks: true }),
+  snr: chartCard($("#card-snr"), { title: "Signalrauschabstand (SINR)", sub: "Höher ist besser · ab 13 dB gut", legend: LEG_NR, marks: true }),
+  rsrq: chartCard($("#card-rsrq"), { title: "Signalqualität (RSRQ)", sub: "Höher (näher an 0) ist besser", legend: LEG_NR, marks: true }),
+  daily: chartCard($("#card-daily"), { title: "Tagesverbrauch", sub: "Letzte 30 Tage in GB", legend: LEG_DU }),
+  speed: chartCard($("#card-speed"), { title: "Durchsatz", sub: "Momentane Datenrate in Mbit/s (Mittelwert je Zeitfenster)", legend: LEG_DU, marks: true }),
+};
+const ZOOM = { onZoom: (a, b) => setZoom(a, b), onReset: () => zoomReset() };
+const charts = {
+  rsrp: new LineChart(cards.rsrp.chart, { ...ZOOM, height: 260, unit: "dBm", aria: "Verlauf der Signalstärke", area: true, minSpan: 12, thresholds: [{ v: -90, label: "Gut" }, { v: -100, label: "Mittel" }, { v: -110, label: "Schwach" }] }),
+  ping: new LineChart(cards.ping.chart, { ...ZOOM, height: 240, unit: "ms", decimals: 1, aria: "Verlauf der Ping-Antwortzeiten", floor: 0, minSpan: 20 }),
+  snr: new LineChart(cards.snr.chart, { ...ZOOM, height: 200, unit: "dB", decimals: 1, aria: "Verlauf des SINR", area: true, minSpan: 8, thresholds: [{ v: 13, label: "Gut" }, { v: 5, label: "Mittel" }] }),
+  rsrq: new LineChart(cards.rsrq.chart, { ...ZOOM, height: 200, unit: "dB", decimals: 1, aria: "Verlauf des RSRQ", area: true, minSpan: 6, thresholds: [{ v: -10, label: "Gut" }, { v: -14, label: "Mittel" }] }),
+  speed: new LineChart(cards.speed.chart, { ...ZOOM, height: 220, unit: "Mbit/s", decimals: 1, aria: "Verlauf der Datenrate", floor: 0, minSpan: 4 }),
+  daily: new BarChart(cards.daily.chart, { height: 240, aria: "Tagesverbrauch", onPick: (day) => { const a = Date.parse(day + "T00:00:00") / 1000; setZoom(a, a + 86400); } }),
+};
+// Ping-Karte: Statistikzeile + Zieltabelle unter dem Diagramm
+const pingStats = el("div", "pingstats"), pingSum = el("div", "scroll");
+cards.ping.root.append(pingStats, pingSum);
+
+const DAYS_FOR = { "1h": 30, "6h": 30, "24h": 30, "7d": 30, "30d": 30, "90d": 90, "365d": 365 };
+const RANGE_SECS = { "1h": 3600, "6h": 6 * 3600, "24h": 86400, "7d": 7 * 86400, "30d": 30 * 86400, "90d": 90 * 86400, "365d": 365 * 86400 };
+let range = (() => { try { const r = localStorage.getItem("zte-range"); return DAYS_FOR[r] ? r : "24h"; } catch { return "24h"; } })();
+let zoom = null; const zoomStack = [];              // zoom = { from, to } (Unix-Sekunden) oder null = Voreinstellung
+const nowSec = () => Math.floor(Date.now() / 1000);
+const qs = () => (zoom ? `from=${zoom.from}&to=${zoom.to}` : `range=${range}`);
+const seg = $("#ranges");
+const winFmt = (a, b) => {
+  const da = new Date(a * 1000), db = new Date(b * 1000), same = da.toDateString() === db.toDateString();
+  const f = (d, full) => `${full ? dayFmt(d.getTime() / 1000) + " " : ""}${timeFmt(d.getTime() / 1000)}` + (b - a < 600 ? `:${two(d.getSeconds())}` : "");
+  return same ? `${dayFmt(a)} ${f(da)} – ${f(db)}` : `${f(da, true)} – ${f(db, true)}`;
+};
+const rangeLabel = () => (zoom ? `Ausschnitt ${winFmt(zoom.from, zoom.to)}` : RANGE_LABEL[range]);
+function markRange() {
+  seg.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", !zoom && b.dataset.r === range));
+  $("#csv").href = `/api/export.csv?${qs()}`; $("#csv2").href = `/api/export.csv?${qs()}&kind=ping`;
+  $("#zoombar").hidden = !zoom; $("#zoomhint").hidden = !!zoom;
+  if (zoom) $("#zoom-txt").textContent = `${winFmt(zoom.from, zoom.to)} (${fmtDur(zoom.to - zoom.from)})`;
+}
+function reloadAll() { loadHistory(true); loadDaily(); }
+function setZoom(from, to, push = true) {
+  const now = nowSec(), minFrom = now - 800 * 86400;
+  to = Math.min(Math.round(to), now); from = Math.max(Math.round(from), minFrom);
+  if (to - from < 30) from = to - 30;
+  if (push) zoomStack.push(zoom ? { ...zoom } : null);
+  zoom = { from, to }; markRange(); reloadAll();
+}
+function zoomReset() { if (!zoom) return; zoom = null; zoomStack.length = 0; markRange(); reloadAll(); }
+function zoomBack() { if (!zoomStack.length) return zoomReset(); zoom = zoomStack.pop(); markRange(); reloadAll(); }
+function zoomShift(dir) {
+  if (!zoom) return; const span = zoom.to - zoom.from, now = nowSec();
+  let to = zoom.to + dir * span / 2; to = Math.min(to, now); setZoom(to - span, to, false);
+}
+function zoomScale(f) {
+  if (!zoom) return; const span = zoom.to - zoom.from, c = (zoom.from + zoom.to) / 2, ns = Math.max(30, span * f), now = nowSec();
+  let to = c + ns / 2; if (to > now) to = now; setZoom(to - ns, to, false);
+}
+$("#z-left").onclick = () => zoomShift(-1); $("#z-right").onclick = () => zoomShift(1);
+$("#z-in").onclick = () => zoomScale(0.5); $("#z-out").onclick = () => zoomScale(2);
+$("#z-back").onclick = zoomBack; $("#z-reset").onclick = zoomReset;
+seg.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; range = b.dataset.r; zoom = null; zoomStack.length = 0; try { localStorage.setItem("zte-range", range); } catch {} markRange(); reloadAll(); });
+
+markRange();
+// Darstellung
+$("#theme").addEventListener("click", () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+  const next = cur === "dark" ? "light" : "dark"; document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("zte-theme", next); } catch {}
+});
+try { const t = localStorage.getItem("zte-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+
+const fmtDur = (s) => { s = Math.round(s); return s < 90 ? `${s} s` : s < 5400 ? `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")} s` : `${Math.floor(s / 3600)} h ${String(Math.floor(s % 3600 / 60)).padStart(2, "0")} min`; };
+
+/* ---------- Aktuelle Werte ---------- */
+const netLabel = (n) => ({ SA: "5G SA", NSA: "5G NSA", ENDC: "5G NSA", LTE: "4G LTE", "LTE-A": "4G LTE-A", WCDMA: "3G" }[n] || n || "–");
+let cur = null;
+function renderWatchdog(c) {
+  const m = c.monitor || {}, dot = $("#wd-dot"), txt = $("#wd-txt");
+  let t, cls = "dot";
+  if (!m.ping_enabled) t = "Ping aus";
+  else if (m.reconnecting) { t = "Watchdog: Neustart läuft …"; cls += " on"; }
+  else if (m.watchdog_enabled) {
+    if (m.down_since && m.outage_id != null) { t = `Ausfall seit ${fmtDur(c.now - m.down_since)}`; cls += " off"; }
+    else { t = "Watchdog aktiv" + (m.dry_run ? " (Testmodus)" : "") + (m.reconnects_24h ? ` · ${m.reconnects_24h} Neustart${m.reconnects_24h > 1 ? "s" : ""}/24 Std` : ""); cls += " on"; }
+  } else { t = m.down_since && m.outage_id != null ? `Ausfall seit ${fmtDur(c.now - m.down_since)}` : "Watchdog aus"; if (t.startsWith("Ausfall")) cls += " off"; }
+  dot.className = cls; txt.textContent = t;
+  // Live-Werte in der Ping-Tabelle
+  const lp = Object.fromEntries((m.last_ping || []).map((x) => [x.target, x.rtt]));
+  const fresh = m.last_ping_ts && c.now - m.last_ping_ts < 120;
+  document.querySelectorAll("[data-live]").forEach((td) => {
+    const k = td.dataset.live; td.textContent = !fresh || !(k in lp) ? "–" : lp[k] == null ? "Timeout" : `${fmt(lp[k], 1)} ms`;
+    td.className = "num tag-live";
+  });
+}
+let uiRefresh = 5;
+function renderCurrent(c) {
+  cur = c; const s = c.sample, st = c.status || {}, now = c.now;
+  uiRefresh = (c.config && c.config.ui_refresh) || 5;
+  $("#logout").hidden = !(c.auth && c.auth.enabled);
+  renderWatchdog(c);
+  const age = s ? now - s.ts : null, stale = age == null || age > Math.max(30, c.config.poll * 4);
+  const pdot = $("#pdot"), ptxt = $("#ptxt");
+  pdot.className = "dot " + (st.online === false || stale ? "off" : "on");
+  ptxt.textContent = st.online === false ? "Router nicht erreichbar" : stale ? (s ? "Keine aktuellen Daten" : "Warte auf erste Messung") : "Live";
+  $("#upd").textContent = s ? `Letzte Messung ${timeFmt(s.ts)} Uhr` : "";
+  if (!s) { $("#sub").textContent = "Noch keine Messwerte"; return; }
+  const isNr = s.nr_rsrp != null, rsrp = isNr ? s.nr_rsrp : s.lte_rsrp;
+  const rsrq = isNr ? s.nr_rsrq : s.lte_rsrq, snr = isNr ? s.nr_snr : s.lte_snr, rssi = isNr ? s.nr_rssi : s.lte_rssi;
+  $("#sub").textContent = [s.provider, netLabel(s.net_type), s.band].filter(Boolean).join(" · ");
+  $("#h-rsrp").textContent = fmt(rsrp);
+  const L = rsrpLevel(rsrp); setQ($("#h-q"), L);
+  const pct = rsrp == null ? 0 : Math.max(0, Math.min(100, (rsrp + 130) / 60 * 100));
+  const mi = $("#h-meter i"); mi.style.width = pct + "%"; mi.style.background = L ? L.color : "var(--axis)";
+  document.querySelectorAll("#bars i").forEach((b, i) => b.classList.toggle("on", s.bars != null && i < s.bars));
+  const meta = $("#h-meta"); meta.replaceChildren();
+  const add = (k, v) => { if (v == null || v === "") return; const sp = el("span"); sp.append(document.createTextNode(k + " "), el("b", "", v)); meta.appendChild(sp); };
+  add("Netz", netLabel(s.net_type)); add("Band", s.band); add("PCI", s.pci); add("Bandbreite", s.bw ? s.bw + " MHz" : null); add("ARFCN", s.arfcn);
+  $("#t-snr").replaceChildren(document.createTextNode(fmt(snr, 1)), el("small", "", "dB")); setQ($("#t-snr-q"), snrLevel(snr));
+  $("#t-rsrq").replaceChildren(document.createTextNode(fmt(rsrq)), el("small", "", "dB")); setQ($("#t-rsrq-q"), rsrqLevel(rsrq));
+  $("#t-rssi").replaceChildren(document.createTextNode(fmt(rssi)), el("small", "", "dBm"));
+  const ca = s.ca || [];
+  $("#t-cells").textContent = String(1 + ca.length);
+  $("#t-cells-n").textContent = ca.length ? `Primär ${s.band || ""} + ${ca.map((x) => x.band).join(", ")}` : (isNr ? "nur Primärzelle" : "LTE");
+  renderCells(s, isNr);
+  renderUsage(c);
+  renderSpeedHead(c);
+  $("#foot").replaceChildren(...[
+    `Router ${c.config.host}`, `Abfrage alle ${c.config.poll} s`, `${fmt(c.db.samples)} Rohmesspunkte`,
+    c.db.since ? `Daten seit ${new Date(c.db.since * 1000).toLocaleDateString("de-DE")}` : "",
+    `Rohdaten ${c.config.raw_days} Tage, danach Stundenwerte (dauerhaft)`,
+  ].filter(Boolean).map((t) => el("span", "", t)));
+}
+function renderCells(s, isNr) {
+  const tb = $("#cells tbody"); tb.replaceChildren();
+  const row = (cells) => { const tr = el("tr"); cells.forEach((c, i) => tr.appendChild(el("td", i ? "num" : "", c))); tb.appendChild(tr); };
+  const f = (v, d = 0) => (v == null ? "–" : fmt(v, d));
+  if (isNr) row(["Primär", s.band || "–", f(s.pci), f(s.arfcn).replace(/\./g, ""), s.bw ? s.bw + " MHz" : "–", f(s.nr_rsrp) + " dBm", f(s.nr_rsrq) + " dB", f(s.nr_snr, 1) + " dB"]);
+  else row(["Primär", s.band || "–", "–", "–", "–", f(s.lte_rsrp) + " dBm", f(s.lte_rsrq) + " dB", f(s.lte_snr, 1) + " dB"]);
+  for (const c of s.ca || []) row(["Zusatzträger", c.band, f(c.pci), String(c.arfcn), c.bw + " MHz", f(c.rsrp) + " dBm", f(c.rsrq) + " dB", f(c.snr, 1) + " dB"]);
+  $("#cell-note").textContent = s.cell_id ? `Zell-ID ${s.cell_id}` : "";
+}
+function renderUsage(c) {
+  const st = c.status || {}, u = c.usage;
+  const note = $("#u-note"); note.className = "note";
+  if (!st.usage_configured) { note.replaceChildren(document.createTextNode("Für den Datenverbrauch fehlt das Router-Passwort. Die Signalwerte laufen auch ohne. "), Object.assign(el("a", "", "Jetzt eintragen"), { href: "#/settings" })); note.classList.add("warn"); }
+  else if (st.usage_ok === false) { note.textContent = "Datenverbrauch aktuell nicht abrufbar: " + (st.login_error || st.usage_error || ""); note.classList.add("warn"); }
+  else note.textContent = "";
+  const [tv, tu] = fmtBytes(c.today.rx + c.today.tx); $("#u-today").textContent = `${tv} ${tu}`;
+}
+function renderSpeedHead(c) {
+  const u = c.usage; const sub = $("#card-speed .card-h p");
+  if (u && u.rx_speed != null && c.now - u.ts < 120) sub.textContent = `Aktuell ↓ ${fmt(mbit(u.rx_speed), 1)} · ↑ ${fmt(mbit(u.tx_speed), 1)} Mbit/s · Mittelwert je Zeitfenster`;
+  else sub.textContent = "Momentane Datenrate in Mbit/s (Mittelwert je Zeitfenster)";
+}
+
+/* ---------- Verlauf ---------- */
+const RANGE_LABEL = { "1h": "letzte Stunde", "6h": "letzte 6 Std", "24h": "letzte 24 Std", "7d": "letzte 7 Tage", "30d": "letzte 30 Tage", "90d": "letzte 90 Tage", "365d": "letztes Jahr" };
+let busy = false;
+async function loadHistory(force) {
+  if (busy) { if (force) setTimeout(() => loadHistory(true), 400); return; } busy = true; Object.values(cards).forEach((c) => c.loading(true));
+  try {
+    const h = await getJSON(`/api/history?${qs()}`);
+    const sg = h.signal, until = h.now, since = h.since, marks = h.marks;
+    const hasMarks = marks.reconnects.length + marks.outages.length > 0;
+    const base = { t: sg.t, since, until, bucket: h.bucket, marks };
+    const ser = (label, color, key) => ({ label, color, values: sg[key] });
+    const both = (a, b) => [ser("5G NR", S1, a), ser("4G LTE", S2, b)].filter((s) => s.values.some((v) => v != null));
+    charts.rsrp.set({ ...base, series: both("nr_rsrp", "lte_rsrp") });
+    charts.snr.set({ ...base, series: both("nr_snr", "lte_snr") });
+    charts.rsrq.set({ ...base, series: both("nr_rsrq", "lte_rsrq") });
+    const tr = h.traffic;
+    charts.speed.set({ t: tr.t, since, until, bucket: h.bucket, marks, series: [
+      { label: "Download", color: S1, values: tr.rx_speed.map(mbit) }, { label: "Upload", color: S2, values: tr.tx_speed.map(mbit) }] });
+    for (const k of ["rsrp", "snr", "rsrq"]) cards[k].setLegend(LEG_NR, hasMarks);
+    cards.speed.setLegend(LEG_DU, hasMarks);
+    const tt = (t) => dateFmt.format(new Date(t * 1000));
+    cards.rsrp.fillTable(["Zeit", "5G NR (dBm)", "4G LTE (dBm)"], sg.t.map((t, i) => [tt(t), fmt(sg.nr_rsrp[i]), fmt(sg.lte_rsrp[i])]).reverse());
+    cards.snr.fillTable(["Zeit", "NR SINR (dB)", "LTE SINR (dB)"], sg.t.map((t, i) => [tt(t), fmt(sg.nr_snr[i], 1), fmt(sg.lte_snr[i], 1)]).reverse());
+    cards.rsrq.fillTable(["Zeit", "NR RSRQ (dB)", "LTE RSRQ (dB)"], sg.t.map((t, i) => [tt(t), fmt(sg.nr_rsrq[i]), fmt(sg.lte_rsrq[i])]).reverse());
+    cards.speed.fillTable(["Zeit", "Download (Mbit/s)", "Upload (Mbit/s)"], tr.t.map((t, i) => [tt(t), fmt(mbit(tr.rx_speed[i]), 1), fmt(mbit(tr.tx_speed[i]), 1)]).reverse());
+    // Statistik & Qualitätsverteilung
+    const st = h.stats.nr_rsrp || h.stats.lte_rsrp;
+    $("#s-avg").textContent = st ? fmt(st.avg, 1) : "–"; $("#s-max").textContent = st ? fmt(st.max) : "–"; $("#s-min").textContent = st ? fmt(st.min) : "–";
+    $("#q-sub").textContent = `RSRP-Klassen, ${rangeLabel()}`;
+    const groups = h.quality, total = groups.reduce((a, b) => a + b, 0);
+    const qb = $("#qbar"), ql = $("#qleg"); qb.replaceChildren(); ql.replaceChildren();
+    LEVELS.forEach((L, i) => {
+      const p = total ? groups[i] / total * 100 : 0;
+      if (p > 0) { const seg = document.createElement("i"); seg.style.width = p + "%"; seg.style.flex = `${p} 1 0`; seg.style.background = L.color; seg.title = `${L.label}: ${fmt(p, 1)} %`; qb.appendChild(seg); }
+      const d = el("div"); d.append(levelIcon(L), el("span", "", L.label), el("strong", "", total ? fmt(p, 1) + " %" : "–")); ql.appendChild(d);
+    });
+    if (!total) { const seg = document.createElement("i"); seg.style.flex = "1"; seg.style.background = "var(--wash)"; qb.appendChild(seg); }
+    // Ereignisse
+    const ev = $("#events"); ev.replaceChildren();
+    const KIND = { cell: "Zellwechsel", offline: "Router offline", online: "Router online", usage: "Datenverbrauch", outage: "Ausfall", outage_end: "Wieder erreichbar", reconnect: "Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus" };
+    for (const e of h.events) { const li = el("li"); li.append(el("time", "", dateFmt.format(new Date(e.ts * 1000))), el("span", "badge", KIND[e.kind] || e.kind), el("span", "", e.detail)); ev.appendChild(li); }
+    if (!h.events.length) ev.appendChild(el("li", "muted", "Keine Ereignisse im gewählten Zeitraum."));
+    // Verbrauch im Zeitraum
+    $("#u-range-l").textContent = zoom ? "Im Ausschnitt" : `Im Zeitraum (${RANGE_LABEL[range]})`;
+    $("#u-range").textContent = bytesStr(h.range_rx + h.range_tx);
+  } catch (e) { console.error(e); }
+  try { await loadPing(); } catch (e) { console.error(e); }
+  Object.values(cards).forEach((c) => c.loading(false)); busy = false;
+}
+
+async function loadPing() {
+  const p = await getJSON(`/api/ping?${qs()}`);
+  const shown = p.targets.slice(0, 8), colorOf = (i) => `var(--c${i + 1})`;
+  const hasMarks = p.marks.reconnects.length + p.marks.outages.length > 0;
+  charts.ping.set({ t: p.t, since: p.since, until: p.now, bucket: p.bucket, marks: p.marks,
+    series: shown.map((tg, i) => ({ label: tg.name, color: colorOf(i), values: tg.avg,
+      extra: (j) => (tg.loss[j] > 0 ? `${fmt(tg.loss[j], tg.loss[j] < 10 ? 1 : 0)} % Verlust` : "") })) });
+  cards.ping.setLegend(shown.map((tg, i) => ({ label: tg.name, color: colorOf(i) })), hasMarks);
+  const tt = (t) => dateFmt.format(new Date(t * 1000));
+  cards.ping.fillTable(["Zeit", ...shown.map((t) => t.name)], p.t.map((t, i) => [tt(t), ...shown.map((tg) => tg.avg[i] != null ? fmt(tg.avg[i], 1) + " ms" : tg.loss[i] > 0 ? "Timeout" : "–")]).reverse());
+  // Statistikzeile
+  pingStats.replaceChildren();
+  const sp = (k, v) => { const s = el("span"); s.append(document.createTextNode(k + " "), el("b", "", v)); pingStats.appendChild(s); };
+  sp("Ausfälle:", String(p.outage_count)); sp("Ausfalldauer gesamt:", p.outage_seconds ? fmtDur(p.outage_seconds) : "–"); sp("Verbindungs-Neustarts:", String(p.reconnect_count));
+  sp(zoom ? "Ausschnitt:" : "Zeitraum:", zoom ? winFmt(zoom.from, zoom.to) : RANGE_LABEL[range]);
+  // Zieltabelle
+  const t = el("table"), th = el("thead"), tr = el("tr");
+  ["Ziel", "Aktuell", "Ø", "Min", "Max", "Jitter", "Verlust"].forEach((c, i) => tr.appendChild(el("th", i ? "num" : "", c))); th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody");
+  p.summary.forEach((s, i) => {
+    const row = el("tr"), first = el("td");
+    if (i < 8) { const k = el("span", "k"); k.style.background = colorOf(i); first.appendChild(k); }
+    first.appendChild(document.createTextNode(s.target));
+    if (s.watchdog) first.appendChild(el("span", "badge wd", "Watchdog"));
+    row.appendChild(first);
+    const live = el("td", "num tag-live", "–"); live.dataset.live = s.target; row.appendChild(live);
+    const ms = (v) => (v == null ? "–" : `${fmt(v, 1)} ms`);
+    [s.n ? ms(s.avg) : "–", s.n ? ms(s.min) : "–", s.n ? ms(s.max) : "–", s.n ? ms(s.jitter) : "–", s.n ? `${fmt(s.loss_pct, s.loss_pct < 10 ? 2 : 1)} %` : "–"].forEach((v) => row.appendChild(el("td", "num", v)));
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); pingSum.replaceChildren(t);
+  if (cur) renderWatchdog(cur);
+}
+
+async function loadDaily() {
+  try {
+    let n = DAYS_FOR[range] || 30, end = "";
+    if (zoom) {
+      n = Math.max(7, Math.min(365, Math.ceil((zoom.to - zoom.from) / 86400) + 1));
+      const de = new Date(zoom.to * 1000); end = `&end=${de.getFullYear()}-${two(de.getMonth() + 1)}-${two(de.getDate())}`;
+    }
+    const d = await getJSON(`/api/daily?days=${n}${end}`);
+    charts.daily.set(d.days);
+    $("#card-daily .card-h p").textContent = zoom ? `${n} Tage bis ${dayFmt(zoom.to)} in GB` : `Letzte ${n} Tage in GB`;
+    cards.daily.fillTable(["Tag", "Download", "Upload", "Gesamt"], d.days.slice().reverse().map((x) => [new Date(x.day + "T12:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }), bytesStr(x.rx), bytesStr(x.tx), bytesStr(x.rx + x.tx)]));
+    const p = d.period, tot = p.rx + p.tx, [v, u] = fmtBytes(tot);
+    $("#u-total").replaceChildren(document.createTextNode(v), el("small", "", u));
+    const f = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+    $("#u-period").textContent = p.source === "router" ? `Monatszähler des Routers · ab ${f(p.start)}` : `Seit Aufzeichnungsbeginn · Zeitraum ${f(p.start)} – ${f(p.end)}`;
+    $("#u-rx").textContent = bytesStr(p.rx); $("#u-tx").textContent = bytesStr(p.tx);
+    const m = $("#u-meter"), lim = d.limit_gb, ln = $("#u-limit");
+    if (lim > 0) {
+      const used = tot / 1e9, pct = Math.min(100, used / lim * 100);
+      const L = pct < 75 ? null : pct < 90 ? LEVELS[1] : pct < 100 ? LEVELS[2] : LEVELS[3];
+      m.hidden = false; m.querySelector("i").style.width = pct + "%"; m.querySelector("i").style.background = L ? L.color : "var(--s1)";
+      ln.replaceChildren(document.createTextNode(`${fmt(pct, 0)} % von ${fmt(lim, 0)} GB · noch ${fmt(Math.max(0, lim - used), 1)} GB`));
+    } else { m.hidden = true; ln.textContent = "Tarif ohne Datenlimit"; }
+    renderForecast(d);
+  } catch (e) { console.error(e); }
+}
+
+function renderForecast(d) {
+  const fc = d.forecast, box = $("#u-fc");
+  if (!fc || !fc.used) { box.hidden = true; return; }
+  box.hidden = false;
+  const endDay = new Date(fc.period_end + "T12:00:00"); endDay.setDate(endDay.getDate() - 1);
+  $("#fc-end").textContent = endDay.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+  $("#fc-val").textContent = "≈ " + bytesStr(fc.estimate);
+  const scale = Math.max(fc.high, fc.estimate, fc.used, 1);
+  const bar = $("#fc-bar"); bar.replaceChildren();
+  const u = document.createElement("i"); u.style.width = fc.used / scale * 100 + "%"; u.style.background = "var(--s1)";
+  const r = document.createElement("i"); r.className = "rest"; r.style.width = Math.max(0, fc.estimate - fc.used) / scale * 100 + "%"; r.style.background = "var(--s1)";
+  bar.append(u, r);
+  const parts = [`Spanne ${bytesStr(fc.low)} – ${bytesStr(fc.high)}`, `Ø ${bytesStr(fc.avg_per_day)} pro Tag (${fc.basis})`];
+  if (fc.quality === "grob") parts.push("grobe Schätzung, wird mit jedem Tag genauer");
+  if (fc.limit_reached_on) parts.push(`Limit voraussichtlich am ${new Date(fc.limit_reached_on + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} erreicht`);
+  $("#fc-note").textContent = parts.join(" · ");
+  $("#fc-lin").textContent = `Zum Vergleich linear hochgerechnet (wie vnStat): ${bytesStr(fc.linear)}`;
+}
+
+/* ---------- Formularbausteine ---------- */
+const frow = (label, input, hint) => { const d = el("label", "frow" + (["text", "password", "url"].includes(input.type) ? " txt" : "")); d.append(el("span", "fl", label), input, el("span", "fh", hint || "")); return d; };
+const numIn = (v, min, max, step = 1) => { const i = el("input"); i.type = "number"; i.min = min; i.max = max; i.step = step; i.value = v; return i; };
+const chkIn = (v) => { const i = el("input"); i.type = "checkbox"; i.checked = !!v; return i; };
+const txtIn = (v, ph, type = "text") => { const i = el("input"); i.type = type; i.value = v ?? ""; if (ph) i.placeholder = ph; i.spellcheck = false; return i; };
+const okIcon = (ok) => ok === true ? levelIcon(LEVELS[0]) : ok === false ? levelIcon(LEVELS[3]) : (() => { const s = svgEl("svg", { width: 14, height: 14, viewBox: "0 0 14 14", "aria-hidden": "true" }); svgEl("path", { d: "M3 7h8", stroke: "var(--muted)", "stroke-width": 2, "stroke-linecap": "round" }, s); return s; })();
+
+/* ---------- Einstellungsseite ---------- */
+const SET = { dirty: false, data: null, f: null };
+function markDirty(on = true) {
+  SET.dirty = on;
+  $("#savebar").hidden = !(on && routeState.cur === "settings");
+  $("#save-msg").textContent = on ? "Nicht gespeicherte Änderungen" : "";
+}
+function setCard(title, sub, cls = "") {
+  const c = el("div", "card " + cls), h = el("div", "card-h"), t = el("div");
+  t.appendChild(el("h2", "", title)); if (sub) t.appendChild(el("p", "", sub)); h.appendChild(t); c.appendChild(h); return c;
+}
+function targetRow(t) {
+  const tr = el("tr");
+  const host = el("input"); host.type = "text"; host.value = t.host; host.placeholder = "z. B. 1.1.1.1 oder google.com"; host.setAttribute("aria-label", "Ziel"); host.spellcheck = false;
+  const method = el("select"); method.setAttribute("aria-label", "Methode");
+  for (const [v, l] of [["icmp", "Ping (ICMP)"], ["tcp", "TCP-Verbindung"]]) { const o = el("option", "", l); o.value = v; method.appendChild(o); }
+  method.value = t.method;
+  const port = numIn(t.port, 1, 65535); port.setAttribute("aria-label", "Port"); port.disabled = t.method !== "tcp";
+  method.onchange = () => { port.disabled = method.value !== "tcp"; };
+  const wd = chkIn(t.watchdog); wd.setAttribute("aria-label", "Für Watchdog verwenden");
+  const del = el("button", "btn", "×"); del.type = "button"; del.setAttribute("aria-label", "Ziel entfernen"); del.onclick = () => { tr.remove(); markDirty(); };
+  const td = (n, cls) => { const c = el("td", cls); c.appendChild(n); return c; };
+  tr.append(td(host), td(method), td(port), td(wd, "c"), td(del, "c"));
+  tr._get = () => ({ host: host.value.trim(), method: method.value, port: Number(port.value) || 443, watchdog: wd.checked });
+  return tr;
+}
+
+function buildSettings(r) {
+  const s = r.settings, g = s.general, cap = r.capabilities, body = $("#set-body");
+  SET.data = r; body.replaceChildren();
+  const f = SET.f = { g: {}, ping: {}, wd: {} };
+
+  // 1. Verbindung zum Router
+  const c1 = setCard("Verbindung zum Router", "Adresse und Admin-Passwort der Router-Oberfläche");
+  f.host = txtIn(g.host, "http://192.168.168.1", "url"); c1.appendChild(frow("Router-Adresse", f.host, "Standard beim ZTE G5TS: http://192.168.168.1"));
+  f.pw = txtIn("", r.router.password_set ? "•••••••• (gespeichert)" : "Passwort der Router-Oberfläche", "password"); f.pw.autocomplete = "new-password";
+  c1.appendChild(frow("Router-Passwort", f.pw, r.router.password_set ? "Leer lassen = unverändert. Nötig für Datenverbrauch und Verbindungs-Neustart." : "Nötig für Datenverbrauch und Verbindungs-Neustart. Die Signalwerte laufen auch ohne."));
+  if (r.router.password_source === "ui") {
+    f.clearpw = chkIn(false); c1.appendChild(frow("Gespeichertes Passwort entfernen", f.clearpw));
+  } else if (r.router.password_source === "env") {
+    c1.appendChild(el("p", "hint", "Das Passwort kommt aus der Umgebungsvariable ZTE_PASSWORD. Ein hier gespeichertes Passwort hat Vorrang."));
+  }
+  const stat = el("div", "status-line"); const ls = r.router.login_state;
+  const LS = { ok: [true, "Angemeldet – Datenverbrauch wird abgerufen"], none: [null, "Kein Passwort hinterlegt"], pending: [null, "Anmeldung steht noch aus"], failed: [false, r.router.login_error || "Anmeldung abgelehnt"], paused: [false, r.router.login_error || "Anmeldung pausiert"] };
+  const [lok, ltxt] = LS[ls] || [null, ls]; stat.append(okIcon(lok), document.createTextNode(ltxt)); c1.appendChild(stat);
+  const testBtn = el("button", "btn", "Verbindung testen"); testBtn.type = "button"; const steps = el("ul", "steps"); steps.hidden = true;
+  testBtn.onclick = async () => {
+    testBtn.disabled = true; steps.hidden = false; steps.replaceChildren(el("li", "muted", "Teste …"));
+    try {
+      const res = await api("POST", "/api/test-router", { host: f.host.value.trim(), password: f.pw.value });
+      steps.replaceChildren(...res.steps.map((x) => { const li = el("li"); li.append(okIcon(x.ok), el("span", "", x.name), el("span", "st-d", x.detail + (x.ms ? ` · ${x.ms} ms` : ""))); return li; }));
+    } catch (e) { steps.replaceChildren(el("li", "", e.message)); }
+    testBtn.disabled = false;
+  };
+  c1.append(testBtn, steps);
+  c1.appendChild(el("p", "hint", "Der Test verwendet die eingegebenen Werte (oder die gespeicherten) und speichert nichts. Er macht einen Anmeldeversuch am Router. Das Passwort wird lokal in der Datenbank des Dashboards abgelegt."));
+  body.appendChild(c1);
+
+  // 2. Abfrage & Aktualisierung
+  const c2 = setCard("Abfrage & Aktualisierung", "Wie oft gemessen und angezeigt wird – gilt sofort, ohne Neustart");
+  f.g.poll_s = numIn(g.poll_s, 2, 3600); c2.appendChild(frow("Signal abfragen (Sekunden)", f.g.poll_s, "Alle so viele Sekunden werden Signalwerte gespeichert. Kürzer = feinere Diagramme, aber mehr Daten (mind. 2)."));
+  f.g.usage_s = numIn(g.usage_s, 10, 3600); c2.appendChild(frow("Datenverbrauch abfragen (Sekunden)", f.g.usage_s, "Braucht das Router-Passwort. Nie kürzer als das Signalintervall."));
+  f.g.ui_refresh_s = numIn(g.ui_refresh_s, 2, 300); c2.appendChild(frow("Anzeige aktualisieren (Sekunden)", f.g.ui_refresh_s, "Wie oft sich diese Oberfläche neue Werte holt. Diagramme laden seltener nach."));
+  f.g.raw_days = numIn(g.raw_days, 7, 3650); c2.appendChild(frow("Rohdaten aufbewahren (Tage)", f.g.raw_days, "Danach bleiben Stundenwerte dauerhaft erhalten – es wird nichts endgültig gelöscht."));
+  body.appendChild(c2);
+
+  // 3. Tarif
+  const c3 = setCard("Tarif", "Für Fortschrittsbalken und Prognose");
+  f.g.limit_gb = numIn(g.limit_gb, 0, 100000, 0.1); c3.appendChild(frow("Datenlimit (GB)", f.g.limit_gb, "0 = unbegrenzt (kein Fortschrittsbalken, keine Limit-Warnung)."));
+  f.g.billing_day = numIn(g.billing_day, 1, 28); c3.appendChild(frow("Abrechnungstag", f.g.billing_day, "Tag, an dem der Zähler des Routers zurückgesetzt wird (1 = Monatsanfang)."));
+  body.appendChild(c3);
+
+  // 4. Sicherheit (eigene Aktionen, nicht Teil von "Speichern")
+  body.appendChild(buildSecurity(r.security));
+
+  // 5. Ping
+  const c5 = setCard("Ping-Messung", "Antwortzeiten zu Testzielen messen und speichern", "wide");
+  c5.appendChild(el("p", "hint", "Die Ziele werden von dem Gerät aus gemessen, auf dem das Dashboard läuft. Nur Ziele aus dieser Liste erscheinen in Diagrammen und Auswertungen."));
+  if (!cap.icmp) c5.appendChild(el("p", "hint", "Hinweis: Auf diesem System wurde kein ping-Programm gefunden – ICMP-Ziele werden ersatzweise per TCP-Verbindung auf Port 443 gemessen."));
+  f.ping.enabled = chkIn(s.ping.enabled); c5.appendChild(frow("Ping-Messung aktiv", f.ping.enabled));
+  f.ping.interval_s = numIn(s.ping.interval_s, 5, 3600); c5.appendChild(frow("Intervall (Sekunden)", f.ping.interval_s, "Alle Ziele werden in dieser Taktung gemessen (mind. 5)."));
+  f.ping.timeout_ms = numIn(s.ping.timeout_ms, 200, 10000); c5.appendChild(frow("Zeitlimit (ms)", f.ping.timeout_ms, "Ohne Antwort innerhalb dieser Zeit gilt der Ping als verloren."));
+  const table = el("table", "ttable"), head = el("tr");
+  ["Ziel", "Methode", "Port", "Watchdog", ""].forEach((h) => head.appendChild(el("th", h === "Watchdog" ? "c" : "", h)));
+  const thd = el("thead"); thd.appendChild(head); table.appendChild(thd);
+  const tb = el("tbody"); s.ping.targets.forEach((t) => tb.appendChild(targetRow(t))); table.appendChild(tb); f.tbody = tb;
+  const wrap = el("div", "scroll"); wrap.appendChild(table); c5.appendChild(el("div", "sec", "Ziele")); c5.appendChild(wrap);
+  const add = el("button", "btn", "+ Ziel hinzufügen"); add.type = "button"; add.style.marginTop = "6px";
+  add.onclick = () => { if (tb.children.length >= 10) return; const r2 = targetRow({ host: "", method: "icmp", port: 443, watchdog: false }); tb.appendChild(r2); r2.querySelector("input").focus(); markDirty(); };
+  c5.appendChild(add);
+  c5.appendChild(el("p", "hint", "„Watchdog“ = dieses Ziel zählt für die automatische Neuverbindung. Alle anderen Ziele werden nur gemessen. Im Diagramm werden die ersten 8 Ziele gezeigt. Bereits gespeicherte Messwerte entfernter Ziele bleiben in der Datenbank, werden aber nirgends angezeigt."));
+  body.appendChild(c5);
+
+  // 6. Watchdog
+  const w = s.watchdog;
+  const c6 = setCard("Watchdog – automatisch neu verbinden", "Bei Ausfall die Mobilfunkverbindung neu aufbauen", "wide");
+  c6.appendChild(el("p", "hint", "Wenn die Watchdog-Ziele nicht mehr antworten, wird der Netzwerkmodus des Routers kurz umgestellt und wieder zurückgesetzt. Dadurch meldet sich das Modem neu im Mobilfunknetz an." + (cap.reconnect ? "" : " Dafür fehlt aktuell das Router-Passwort.")));
+  f.wd.enabled = chkIn(w.enabled); c6.appendChild(frow("Watchdog aktiv", f.wd.enabled));
+  f.wd.dry_run = chkIn(w.dry_run); c6.appendChild(frow("Testmodus", f.wd.dry_run, "Nur protokollieren, was passiert wäre – die Verbindung wird nicht angefasst."));
+  f.wd.min_failed_targets = numIn(w.min_failed_targets, 0, 10); c6.appendChild(frow("Ausgefallene Ziele", f.wd.min_failed_targets, "So viele Watchdog-Ziele müssen gleichzeitig ausfallen. 0 = alle."));
+  f.wd.fail_rounds = numIn(w.fail_rounds, 0, 1000); c6.appendChild(frow("Neustart nach … Runden", f.wd.fail_rounds, "Aufeinanderfolgende Ping-Runden ohne Antwort. 0 = nicht verwenden."));
+  f.wd.fail_seconds = numIn(w.fail_seconds, 0, 86400); c6.appendChild(frow("… oder nach … Sekunden", f.wd.fail_seconds, "Zeit seit der ersten fehlgeschlagenen Runde. 0 = nicht verwenden. Es gilt, was zuerst eintritt."));
+  f.wd.outage_rounds = numIn(w.outage_rounds, 1, 100); c6.appendChild(frow("Ausfall ab … Runden", f.wd.outage_rounds, "Ab hier wird ein Ausfall im Diagramm und in den Ereignissen markiert."));
+  f.wd.grace_s = numIn(w.grace_s, 10, 900); c6.appendChild(frow("Wartezeit nach Neustart (s)", f.wd.grace_s, "So lange wird nach einem Neustart nicht gezählt."));
+  f.wd.cooldown_s = numIn(w.cooldown_s, 30, 86400); c6.appendChild(frow("Mindestabstand (s)", f.wd.cooldown_s, "Frühestens nach so vielen Sekunden ist der nächste Neustart erlaubt."));
+  f.wd.max_per_hour = numIn(w.max_per_hour, 1, 30); c6.appendChild(frow("Maximal pro Stunde", f.wd.max_per_hour, "Sicherung gegen Endlosschleifen bei einem Ausfall außerhalb deines Netzes."));
+  c6.appendChild(el("div", "sec", "Manuell"));
+  const man = el("button", "btn danger", "Verbindung jetzt neu starten"); man.type = "button"; man.disabled = !cap.reconnect;
+  const manMsg = el("span", "label"); manMsg.style.marginLeft = "10px";
+  man.onclick = async () => {
+    if (!confirm("Die Mobilfunkverbindung wird jetzt für ca. 10–60 Sekunden unterbrochen. Fortfahren?")) return;
+    try { await api("POST", "/api/reconnect"); manMsg.textContent = "Neustart gestartet – siehe Ereignisse im Dashboard."; } catch (e) { manMsg.textContent = e.message; }
+  };
+  c6.append(man, manMsg);
+  body.appendChild(c6);
+}
+
+function buildSecurity(sec) {
+  const c = setCard("Sicherheit", "Passwortschutz für dieses Dashboard"); c.dataset.nodirty = "1";
+  const days = (v) => { const s = el("select"); for (const d of [1, 7, 30, 90, 365]) { const o = el("option", "", d === 1 ? "1 Tag" : `${d} Tage`); o.value = d; s.appendChild(o); } s.value = String(v); if (s.value !== String(v)) { const o = el("option", "", `${v} Tage`); o.value = v; s.appendChild(o); s.value = String(v); } return s; };
+  const msg = el("div", "status-line"); msg.setAttribute("role", "status");
+  const say = (ok, t) => { msg.replaceChildren(okIcon(ok), document.createTextNode(t)); };
+  const status = el("div", "status-line"); status.append(okIcon(sec.enabled ? true : null), document.createTextNode(sec.enabled ? "Passwortschutz ist aktiv" : "Kein Passwortschutz – jeder im Netzwerk kann das Dashboard öffnen"));
+  c.appendChild(status);
+  const pw1 = txtIn("", "Neues Passwort (mind. 8 Zeichen)", "password"), pw2 = txtIn("", "Neues Passwort wiederholen", "password");
+  pw1.autocomplete = pw2.autocomplete = "new-password";
+  const dsel = days(sec.session_days);
+  const refresh = async () => { buildSettings(await getJSON("/api/settings")); if (SET.dirty) markDirty(false); tickCurrent(); };
+  const call = async (body, done) => {
+    try { await api("POST", "/api/security", body); await refresh(); return true; } catch (e) { say(false, e.message); return false; }
+  };
+  if (!sec.enabled) {
+    c.append(frow("Passwort", pw1), frow("Wiederholen", pw2), frow("Angemeldet bleiben", dsel, "Danach muss das Passwort neu eingegeben werden."));
+    const b = el("button", "btn primary", "Passwortschutz aktivieren"); b.type = "button";
+    b.onclick = () => { if (pw1.value !== pw2.value) return say(false, "Die beiden Passwörter stimmen nicht überein"); call({ action: "set", password: pw1.value, session_days: Number(dsel.value) }); };
+    c.append(b, msg);
+    c.appendChild(el("p", "hint", "Ohne HTTPS wird das Passwort im Heimnetz unverschlüsselt übertragen – für den Zugriff aus dem Internet gehört ein Reverse-Proxy mit HTTPS davor. Passwort vergessen? Mit „python zte_dash.py --reset-auth“ lässt sich der Schutz zurücksetzen."));
+  } else {
+    const cur = txtIn("", "Aktuelles Passwort", "password"); cur.autocomplete = "current-password";
+    c.append(frow("Aktuelles Passwort", cur, "Für jede Änderung nötig."), frow("Neues Passwort", pw1), frow("Wiederholen", pw2), frow("Angemeldet bleiben", dsel));
+    const row = el("div", "stack");
+    const b1 = el("button", "btn primary", "Passwort ändern"); b1.type = "button";
+    b1.onclick = () => { if (pw1.value !== pw2.value) return say(false, "Die beiden Passwörter stimmen nicht überein"); call({ action: "set", current: cur.value, password: pw1.value, session_days: Number(dsel.value) }); };
+    const b2 = el("button", "btn", "Nur Dauer speichern"); b2.type = "button";
+    b2.onclick = () => call({ action: "days", current: cur.value, session_days: Number(dsel.value) });
+    const b3 = el("button", "btn danger", "Schutz abschalten"); b3.type = "button";
+    b3.onclick = () => { if (confirm("Den Passwortschutz wirklich abschalten?")) call({ action: "disable", current: cur.value }); };
+    const b4 = el("button", "btn", "Abmelden"); b4.type = "button"; b4.onclick = doLogout;
+    row.append(b1, b2, b3, b4); c.append(row, msg);
+  }
+  return c;
+}
+
+function collectSettings() {
+  const f = SET.f, v = (i) => (i.type === "checkbox" ? i.checked : Number(i.value));
+  const o = { general: { host: f.host.value.trim() }, ping: {}, watchdog: {} };
+  for (const k in f.g) o.general[k] = f.g[k].value === "" ? null : Number(f.g[k].value);
+  for (const k in f.ping) o.ping[k] = v(f.ping[k]);
+  for (const k in f.wd) o.watchdog[k] = v(f.wd[k]);
+  o.ping.targets = [...f.tbody.children].map((r) => r._get()).filter((t) => t.host);
+  if (f.pw.value) o.router_password = f.pw.value;
+  if (f.clearpw && f.clearpw.checked) o.clear_router_password = true;
+  return o;
+}
+async function loadSettings() {
+  if (SET.dirty) return;
+  try { buildSettings(await getJSON("/api/settings")); markDirty(false); } catch (e) { $("#set-body").replaceChildren(el("div", "card wide", "Einstellungen konnten nicht geladen werden: " + e.message)); }
+}
+$("#set-body").addEventListener("input", (e) => { if (!e.target.closest("[data-nodirty]")) markDirty(); });
+$("#set-body").addEventListener("change", (e) => { if (!e.target.closest("[data-nodirty]")) markDirty(); });
+$("#save-cancel").addEventListener("click", () => { markDirty(false); loadSettings(); });
+$("#save-btn").addEventListener("click", async () => {
+  const btn = $("#save-btn"); btn.disabled = true;
+  try {
+    const r = await api("POST", "/api/settings", collectSettings());
+    buildSettings(r); SET.dirty = false; $("#savebar").hidden = false; $("#save-msg").textContent = "Gespeichert – gilt sofort";
+    setTimeout(() => { if (!SET.dirty) $("#savebar").hidden = true; }, 2500);
+    tickCurrent(); lastDash = 0;
+  } catch (e) { $("#save-msg").textContent = e.message; }
+  btn.disabled = false;
+});
+async function doLogout() { try { await api("POST", "/api/logout"); } catch {} location.href = "/login"; }
+$("#logout").addEventListener("click", doLogout);
+
+/* ---------- Auswertung nach Tageszeit ---------- */
+const hourLabel = (h) => `${two(h)}–${two((h + 1) % 24)} Uhr`;
+const WD = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
+const A = (() => {
+  let r = "30d", m = "score";
+  try { r = localStorage.getItem("zte-a-range") || r; m = localStorage.getItem("zte-a-metric") || m; } catch {}
+  return { range: ["7d", "30d", "90d", "365d"].includes(r) ? r : "30d", metric: m, data: null, loaded: 0 };
+})();
+const A_METRICS = [["score", "Bewertung"], ["rsrp", "Signalstärke"], ["snr", "SINR"], ["latency", "Latenz"], ["loss", "Paketverlust"], ["volume", "Datenmenge"], ["outage", "Ausfälle"]];
+const A_RANGE_LABEL = { "7d": "7 Tage", "30d": "30 Tage", "90d": "90 Tage", "365d": "1 Jahr" };
+
+/* Linie mit Streuband (mittlere 50 %) über 24 Stunden bzw. Säulen bei Summen */
+class HourChart {
+  constructor(host, o) {
+    this.host = host; this.o = Object.assign({ height: 280 }, o); this.m = null; this.idx = null;
+    this.svg = svgEl("svg", { role: "img", "aria-label": o.aria || "" }); host.appendChild(this.svg);
+    this.tip = makeTip(host);
+    new ResizeObserver(() => this.draw()).observe(host);
+  }
+  set(m) { this.m = m; this.draw(); }
+  draw() {
+    const m = this.m, svg = this.svg, H = this.o.height, W = Math.max(280, this.host.clientWidth);
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.replaceChildren();
+    if (!m) return;
+    const mg = { l: 52, r: 14, t: 16, b: 28 }, pw = W - mg.l - mg.r, ph = H - mg.t - mg.b, hrs = m.by_hour;
+    const bars = m.kind === "sum" || m.id === "volume";
+    const vals = hrs.flatMap((x) => x.v == null ? [] : bars ? [x.v] : [x.v, x.p25 ?? x.v, x.p75 ?? x.v]);
+    if (!vals.length) { const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg); t.textContent = "Noch keine Daten im gewählten Zeitraum"; return; }
+    let lo = Math.min(...vals), hi = Math.max(...vals);
+    if (bars || m.id === "loss") lo = 0;
+    if (hi - lo < 1e-9) hi = lo + 1;
+    const pad = (hi - lo) * 0.08; if (!bars) { hi += pad; if (lo !== 0) lo -= pad; } else hi += pad;
+    const sc = niceScale(lo, hi, 4), slot = pw / 24;
+    const X = (h) => mg.l + slot * (h + 0.5), Y = (v) => mg.t + ph - (v - sc.lo) / (sc.hi - sc.lo) * ph;
+    this.X = X; this.Y = Y; this.mg = mg; this.ph = ph;
+    for (const v of sc.ticks) {
+      svgEl("line", { x1: mg.l, x2: W - mg.r, y1: Y(v), y2: Y(v), stroke: "var(--grid)" }, svg);
+      const t = svgEl("text", { x: mg.l - 8, y: Y(v) + 4, "text-anchor": "end", class: "tick" }, svg); t.textContent = fmt(v, decimalsFor(sc.step));
+    }
+    svgEl("line", { x1: mg.l, x2: W - mg.r, y1: mg.t + ph, y2: mg.t + ph, stroke: "var(--axis)" }, svg);
+    const every = pw < 520 ? 4 : 2;
+    for (let h = 0; h < 24; h += every) { const t = svgEl("text", { x: X(h), y: H - 8, "text-anchor": "middle", class: "tick" }, svg); t.textContent = two(h); }
+    const unit = svgEl("text", { x: W - mg.r, y: H - 8, "text-anchor": "end" }, svg); unit.textContent = "Uhr";
+    const good = m.best, bad = m.worst;
+    if (bars) {
+      const bw = Math.min(24, Math.max(3, slot * 0.7));
+      hrs.forEach((x) => {
+        if (x.v == null || x.v <= 0) return;
+        const h0 = Math.max(1, (x.v - Math.max(0, sc.lo)) / (sc.hi - sc.lo) * ph), y = mg.t + ph - h0, cx = X(x.h), r = Math.min(4, h0, bw / 2);
+        svgEl("path", { d: `M${cx - bw / 2} ${y + h0}V${y + r}Q${cx - bw / 2} ${y} ${cx - bw / 2 + r} ${y}H${cx + bw / 2 - r}Q${cx + bw / 2} ${y} ${cx + bw / 2} ${y + r}V${y + h0}Z`, style: "fill:var(--s1)" }, svg);
+      });
+    } else {
+      const seg = (fn) => { let cur = [], out = []; hrs.forEach((x) => { const p = fn(x); if (p == null) { if (cur.length) out.push(cur); cur = []; } else cur.push(p); }); if (cur.length) out.push(cur); return out; };
+      for (const s of seg((x) => x.v == null || x.p25 == null ? null : [X(x.h), Y(x.p75), Y(x.p25)])) {   // Streuband
+        if (s.length < 2) continue;
+        const up = s.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join("L"), dn = s.slice().reverse().map((p) => `${p[0].toFixed(1)} ${p[2].toFixed(1)}`).join("L");
+        svgEl("path", { d: `M${up}L${dn}Z`, style: "fill:var(--s1);fill-opacity:.12" }, svg);
+      }
+      for (const s of seg((x) => x.v == null ? null : [X(x.h), Y(x.v)])) {
+        if (s.length === 1) { svgEl("circle", { cx: s[0][0], cy: s[0][1], r: 2.5, style: "fill:var(--s1)" }, svg); continue; }
+        svgEl("path", { d: "M" + s.map((p) => `${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join("L"), fill: "none", "stroke-width": 2, "stroke-linejoin": "round", "stroke-linecap": "round", style: "stroke:var(--s1)" }, svg);
+      }
+      const mark = (h, label, color) => {                       // beste/schlechteste Stunde: Punkt mit Ring + Beschriftung
+        if (h == null || hrs[h].v == null) return; const x = X(h), y = Y(hrs[h].v);
+        svgEl("circle", { cx: x, cy: y, r: 5, "stroke-width": 2, style: `fill:${color};stroke:var(--surface)` }, svg);
+        const above = y > mg.t + 26, t = svgEl("text", { x, y: above ? y - 11 : y + 20, "text-anchor": "middle", style: "fill:var(--ink);font-weight:600;paint-order:stroke;stroke:var(--surface);stroke-width:3px;stroke-linejoin:round" }, svg);
+        t.textContent = label;
+      };
+      mark(good, "Beste", "var(--good)"); mark(bad, "Schlechteste", "var(--crit)");
+    }
+    this.cross = svgEl("line", { y1: mg.t, y2: mg.t + ph, stroke: "var(--ink-2)", "stroke-width": 1, opacity: 0 }, svg);
+    const hit = svgEl("rect", { x: mg.l, y: mg.t, width: pw, height: ph, fill: "transparent", tabindex: 0 }, svg);
+    hit.style.outline = "none"; hit.style.cursor = "crosshair";
+    const at = (e) => { const r = svg.getBoundingClientRect(), x = (e.clientX - r.left) * (W / r.width); this.show(Math.max(0, Math.min(23, Math.floor((x - mg.l) / slot)))); };
+    hit.addEventListener("pointermove", at); hit.addEventListener("pointerdown", at);
+    hit.addEventListener("pointerleave", () => this.clear()); hit.addEventListener("blur", () => this.clear());
+    hit.addEventListener("focus", () => this.show(this.idx ?? 12));
+    hit.addEventListener("keydown", (e) => { if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); this.show(Math.max(0, Math.min(23, (this.idx ?? 12) + (e.key === "ArrowLeft" ? -1 : 1)))); } });
+  }
+  show(h) {
+    const m = this.m, x = m.by_hour[h], cx = this.X(h); this.idx = h;
+    this.cross.setAttribute("x1", cx); this.cross.setAttribute("x2", cx); this.cross.setAttribute("opacity", 1);
+    const f = (v) => v == null ? "–" : `${fmt(v, m.decimals)} ${m.unit}`, rows = [];
+    if (m.kind === "sum") rows.push({ name: "Ausfallzeit gesamt", value: f(x.v) });
+    else if (x.v == null) rows.push({ name: "Keine Daten", value: "" });
+    else {
+      rows.push({ color: "var(--s1)", name: m.id === "volume" ? "Ø je Stunde" : "Mittelwert", value: f(x.v) });
+      if (x.p25 != null) rows.push({ name: "Mittlere 50 %", value: `${fmt(x.p25, m.decimals)} … ${fmt(x.p75, m.decimals)}` });
+      if (x.min != null) rows.push({ name: "Min … Max", value: `${fmt(x.min, m.decimals)} … ${fmt(x.max, m.decimals)}` });
+      rows.push({ name: "Stunden im Zeitraum", value: String(x.n) });
+    }
+    this.tip.show(cx, this.mg.t, hourLabel(h), rows);
+  }
+  clear() { if (this.cross) this.cross.setAttribute("opacity", 0); this.tip.hide(); }
+}
+
+/* Heatmap Wochentag x Stunde (sequentiell, eine Farbfamilie) */
+class HeatChart {
+  constructor(host) {
+    this.host = host; this.m = null;
+    this.svg = svgEl("svg", { role: "img", "aria-label": "Werte nach Wochentag und Uhrzeit" }); host.appendChild(this.svg);
+    this.tip = makeTip(host);
+    new ResizeObserver(() => this.draw()).observe(host);
+  }
+  set(m) { this.m = m; this.draw(); }
+  range() {
+    const v = this.m.grid.flat().filter((x) => x != null);
+    return v.length ? [Math.min(...v), Math.max(...v)] : [0, 1];
+  }
+  draw() {
+    const m = this.m, svg = this.svg, W = Math.max(280, this.host.clientWidth);
+    svg.replaceChildren(); if (!m) return;
+    const mg = { l: 30, r: 4, t: 4, b: 22 }, pw = W - mg.l - mg.r, cw = pw / 24, ch = Math.max(20, Math.min(30, cw * 1.1)), H = mg.t + ch * 7 + mg.b;
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+    const [lo, hi] = this.range();
+    WD.forEach((d, r) => { const t = svgEl("text", { x: mg.l - 6, y: mg.t + ch * r + ch / 2 + 4, "text-anchor": "end" }, svg); t.textContent = d; });
+    const every = pw < 520 ? 4 : 2;
+    for (let h = 0; h < 24; h += every) { const t = svgEl("text", { x: mg.l + cw * (h + 0.5), y: H - 6, "text-anchor": "middle", class: "tick" }, svg); t.textContent = two(h); }
+    const cells = [];
+    m.grid.forEach((row, r) => row.forEach((v, h) => {
+      const t = v == null ? null : hi === lo ? 0.5 : (v - lo) / (hi - lo);
+      const rect = svgEl("rect", { x: mg.l + cw * h + 1, y: mg.t + ch * r + 1, width: Math.max(1, cw - 2), height: ch - 2, rx: 3, "stroke-width": 2, style: `fill:${t == null ? "var(--wash)" : `color-mix(in srgb, var(--s1) ${Math.round(10 + 90 * t)}%, var(--surface))`};stroke:transparent` }, svg);
+      const on = () => {
+        cells.forEach((c) => (c.style.stroke = "transparent")); rect.style.stroke = "var(--ink)";
+        this.tip.show(mg.l + cw * (h + 0.5), mg.t + ch * r, `${WD[r]} · ${hourLabel(h)}`, [{ name: m.label, value: v == null ? "keine Daten" : `${fmt(v, m.decimals)} ${m.unit}` }]);
+      };
+      const off = () => { rect.style.stroke = "transparent"; this.tip.hide(); };
+      rect.addEventListener("pointerenter", on); rect.addEventListener("pointermove", on); rect.addEventListener("pointerleave", off);
+      cells.push(rect);
+    }));
+  }
+}
+
+const aCards = {
+  hour: chartCard($("#a-hour"), { title: "Verlauf über den Tag", sub: "", legend: [] }),
+  heat: chartCard($("#a-heat"), { title: "Wochentag und Uhrzeit", sub: "", legend: [] }),
+};
+const aHour = new HourChart(aCards.hour.chart, { height: 290, aria: "Verlauf über die 24 Stunden des Tages" });
+const aHeat = new HeatChart(aCards.heat.chart);
+const heatScale = el("div", "heat-scale"); aCards.heat.root.appendChild(heatScale);
+$("#a-metrics").append(...A_METRICS.map(([k, l]) => { const b = el("button", "", l); b.type = "button"; b.dataset.k = k; return b; }));
+
+function markA() {
+  $("#a-ranges").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.r === A.range));
+  $("#a-metrics").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.k === A.metric));
+}
+$("#a-ranges").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; A.range = b.dataset.r; try { localStorage.setItem("zte-a-range", A.range); } catch {} markA(); loadAnalysis(); });
+$("#a-metrics").addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; A.metric = b.dataset.k; try { localStorage.setItem("zte-a-metric", A.metric); } catch {} markA(); if (A.data) renderAnalysis(); });
+
+async function loadAnalysis() {
+  markA(); aCards.hour.loading(true); aCards.heat.loading(true);
+  try { A.data = await getJSON(`/api/hourofday?range=${A.range}`); A.loaded = Date.now(); renderAnalysis(); }
+  catch (e) { $("#a-info").textContent = "Auswertung nicht verfügbar: " + e.message; }
+  aCards.hour.loading(false); aCards.heat.loading(false);
+}
+
+function insightTile(kind, title, main, sub, lv) {
+  const d = el("div", "insight"), k = el("div", "k2");
+  if (lv) k.appendChild(levelIcon(lv)); k.appendChild(document.createTextNode(title));
+  d.append(k, el("div", "v2 tnum", main), el("div", "s2", sub)); return d;
+}
+
+function renderAnalysis() {
+  const d = A.data, m = d.metrics[A.metric]; if (!m) return;
+  $("#a-info").textContent = `${d.days} Tage mit Daten · Grundlage: Stundenwerte (dauerhaft gespeichert)`;
+  const f = (v, dec = m.decimals) => `${fmt(v, dec)} ${m.unit}`;
+  // Kernaussagen
+  const box = $("#a-insights"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div"); tt.append(el("h2", "", `${m.label} – Auswertung nach Tageszeit`), el("p", "", `Letzte ${A_RANGE_LABEL[A.range]} · Ortszeit`)); head.appendChild(tt); box.appendChild(head);
+  const grid = el("div", "insights"); box.appendChild(grid);
+  const hrs = m.by_hour, have = hrs.filter((x) => x.v != null);
+  if (!have.length && m.kind !== "sum") grid.appendChild(el("p", "note", "Noch keine Daten im gewählten Zeitraum. Das Dashboard muss einige Tage laufen, damit sich Muster zeigen."));
+  else if (m.kind === "sum") {
+    const tot = hrs.reduce((a, x) => a + (x.v || 0), 0), peak = hrs.reduce((a, x) => (x.v > (a ? a.v : 0) ? x : a), null);
+    grid.append(insightTile("t", "Ausfallzeit gesamt", tot ? f(tot, 1) : "keine", `im Zeitraum von ${A_RANGE_LABEL[A.range]}`, tot ? LEVELS[2] : LEVELS[0]));
+    grid.append(insightTile("p", "Meiste Ausfallzeit", peak && peak.v > 0 ? hourLabel(peak.h) : "–", peak && peak.v > 0 ? `${f(peak.v, 1)} in dieser Stunde (Summe)` : "Ausfälle werden ab der Ping-Messung erfasst", null));
+  } else if (m.best != null) {
+    const b = hrs[m.best], w = hrs[m.worst], diff = Math.abs(b.v - w.v), rel = w.v && b.v ? Math.abs(b.v - w.v) / Math.min(Math.abs(b.v), Math.abs(w.v)) * 100 : null;
+    grid.append(insightTile("b", "Beste Zeit", hourLabel(m.best), `Ø ${f(b.v)}`, LEVELS[0]));
+    grid.append(insightTile("w", "Schlechteste Zeit", hourLabel(m.worst), `Ø ${f(w.v)}`, LEVELS[3]));
+    const relTxt = rel != null && ["latency", "loss"].includes(m.id) ? ` (${fmt(rel, 0)} % ${m.better === "low" ? "schlechter" : ""})` : "";
+    grid.append(insightTile("d", "Unterschied", f(diff), `zwischen bester und schlechtester Stunde${relTxt}`, null));
+  } else if (m.id === "volume") {
+    const top = have.reduce((a, x) => (x.v > a.v ? x : a), have[0]), low = have.reduce((a, x) => (x.v < a.v ? x : a), have[0]);
+    grid.append(insightTile("a", "Aktivste Zeit", hourLabel(top.h), `Ø ${f(top.v)} je Stunde`, null));
+    grid.append(insightTile("q", "Ruhigste Zeit", hourLabel(low.h), `Ø ${f(low.v)} je Stunde`, null));
+    grid.append(insightTile("s", "Ø pro Tag", bytesStr(have.reduce((a, x) => a + x.v, 0) * 1e6), "Summe der Tagesmittel über 24 Stunden", null));
+  } else grid.appendChild(el("p", "note", "Für eine Aussage zur besten und schlechtesten Zeit sind noch zu wenige Tage erfasst."));
+  // Verlauf
+  const sub = { avg: "Mittelwert je Stunde, Band = mittlere 50 % der Tage", sum: "Summe je Stunde über den Zeitraum" }[m.kind];
+  aCards.hour.root.querySelector(".card-h h2").textContent = `${m.label} im Tagesverlauf`;
+  aCards.hour.root.querySelector(".card-h p").textContent = m.id === "volume" ? "Durchschnittlicher Datenverbrauch je Stunde" : sub;
+  aHour.set(m);
+  aCards.hour.fillTable(["Uhrzeit", "Wert", "Mittlere 50 %", "Min", "Max", "Stunden"], hrs.map((x) => [hourLabel(x.h), x.v == null ? "–" : f(x.v), x.p25 == null ? "–" : `${fmt(x.p25, m.decimals)} … ${fmt(x.p75, m.decimals)}`, x.min == null ? "–" : fmt(x.min, m.decimals), x.max == null ? "–" : fmt(x.max, m.decimals), String(x.n)]));
+  // Heatmap
+  aCards.heat.root.querySelector(".card-h h2").textContent = `${m.label} nach Wochentag und Uhrzeit`;
+  aCards.heat.root.querySelector(".card-h p").textContent = "Dunkler = höherer Wert · Felder ohne Daten sind leer";
+  aHeat.set(m);
+  const [lo, hi] = aHeat.range(); heatScale.replaceChildren(document.createTextNode(f(lo)), el("i"), document.createTextNode(f(hi)));
+  aCards.heat.fillTable(["Tag", ...Array.from({ length: 24 }, (_, h) => two(h))], m.grid.map((row, r) => [WD[r], ...row.map((v) => (v == null ? "–" : fmt(v, m.decimals)))]));
+}
+
+/* ---------- Setup: Standort des Routers finden ---------- */
+const LKEY = (k, d) => { try { const v = localStorage.getItem("zte-su-" + k); return v == null ? d : Number(v); } catch { return d; } };
+const SU = {
+  active: false, seq: 0, buf: [], timer: null, spec: null, err: null, ctx: null, wake: null, measuring: null,
+  window: LKEY("window", 120), smooth: LKEY("smooth", 10), rate: LKEY("rate", 1000), sound: false, spots: [], lastSample: null,
+};
+const SU_SAVE = (k, v) => { try { localStorage.setItem("zte-su-" + k, String(v)); } catch {} };
+/* Sechs Bewertungsstufen; als Status-Farbe gruppiert (Text + Icon tragen die Stufe, nicht die Farbe allein) */
+const SU_GROUP = { excellent: 0, great: 0, good: 0, fair: 1, poor: 2, bad: 3 };
+const SU_SHADE = { excellent: 100, great: 80, good: 60 };
+const suLevel = (id) => LEVELS[SU_GROUP[id] ?? 3];
+const suColor = (id) => SU_SHADE[id] ? `color-mix(in srgb, var(--good) ${SU_SHADE[id]}%, var(--surface))` : suLevel(id).color;
+const suIcon = (id, size = 14) => levelIcon(suLevel(id), size);
+
+/* Bewertung nach der Vorgabe des Servers (Stützpunkte, Gewichte, Stufen) - dieselbe Rechnung wie im Backend */
+function suInterp(x, pts) {
+  if (x <= pts[0][0]) return pts[0][1];
+  for (let i = 1; i < pts.length; i++) if (x <= pts[i][0]) { const [x0, y0] = pts[i - 1], [x1, y1] = pts[i]; return y0 + (y1 - y0) * (x - x0) / (x1 - x0); }
+  return pts[pts.length - 1][1];
+}
+function suLevelOf(score) { const L = SU.spec.levels; let out = L[0]; for (const l of L) if (score >= l.lo) out = l; return out; }
+function suRate(rsrp, snr, rsrq) {
+  const sp = SU.spec; if (!sp || rsrp == null) return null;
+  const parts = { rsrp: suInterp(rsrp, sp.rsrp) }; if (snr != null) parts.snr = suInterp(snr, sp.snr); if (rsrq != null) parts.rsrq = suInterp(rsrq, sp.rsrq);
+  let w = 0, sum = 0; for (const k in parts) { w += sp.weights[k]; sum += parts[k] * sp.weights[k]; }
+  const score = sum / w, lv = suLevelOf(score), lim = Object.keys(parts).reduce((a, k) => (parts[k] < parts[a] ? k : a));
+  const P = {}; for (const k in parts) { const l = suLevelOf(parts[k]); P[k] = { score: parts[k], id: l.id, label: l.label }; }
+  return { score, id: lv.id, label: lv.label, limiting: lim, parts: P };
+}
+
+const suCards = {
+  rsrp: chartCard($("#s-c-rsrp"), { title: "Signalstärke (RSRP)", sub: "Live · höher ist besser", legend: [] }),
+  snr: chartCard($("#s-c-snr"), { title: "Signalrauschabstand (SINR)", sub: "Live · höher ist besser", legend: [] }),
+};
+const suHead = (t) => timeFmt(t) + ":" + two(new Date(t * 1000).getSeconds());
+const suCharts = {
+  rsrp: new LineChart(suCards.rsrp.chart, { height: 200, unit: "dBm", decimals: 0, aria: "Live-Verlauf der Signalstärke", area: true, minSpan: 10, headFmt: suHead }),
+  snr: new LineChart(suCards.snr.chart, { height: 200, unit: "dB", decimals: 1, aria: "Live-Verlauf des Signalrauschabstands", area: true, minSpan: 8, headFmt: suHead }),
+};
+
+/* Skala mit Marker */
+function suBuildScale() {
+  const box = $("#s-scale"), sp = SU.spec; if (!sp || box.dataset.built) return; box.dataset.built = "1"; box.replaceChildren();
+  const L = sp.levels;
+  L.forEach((l, i) => {
+    const hi = i + 1 < L.length ? L[i + 1].lo : 100, seg = el("i"); seg.style.flex = `${hi - l.lo} 1 0`; seg.style.background = suColor(l.id); seg.title = `${l.label}: ab ${l.lo} Punkten`; box.appendChild(seg);
+    const lb = el("span", "lb" + (i % 2 ? " alt" : ""), l.label); lb.style.left = `${(l.lo + (hi - l.lo) / 2)}%`; box.appendChild(lb);
+  });
+  const mk = el("span", "mk"); mk.id = "s-mk"; mk.style.left = "0%"; box.appendChild(mk);
+}
+
+/* Werte über das Glättungsfenster (Sekunden) mitteln */
+function suWindow(secs) {
+  const b = SU.buf; if (!b.length) return [];
+  const last = b[b.length - 1].t; if (!secs) return [b[b.length - 1]];
+  const out = []; for (let i = b.length - 1; i >= 0 && last - b[i].t <= secs; i--) out.push(b[i]); return out.reverse();
+}
+const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : null);
+const stdev = (a) => { if (a.length < 2) return 0; const m = mean(a); return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length); };
+const num1 = (arr, k) => arr.map((x) => x[k]).filter((v) => v != null);
+
+function suRender() {
+  const last = SU.buf[SU.buf.length - 1];
+  const banner = $("#s-banner");
+  if (SU.err) { banner.hidden = false; banner.textContent = "Router nicht erreichbar: " + SU.err; } else banner.hidden = true;
+  if (!last || !SU.spec) return;
+  suBuildScale();
+  const w = suWindow(SU.smooth), rsrp = mean(num1(w, "rsrp")), snr = mean(num1(w, "snr")), rsrq = mean(num1(w, "rsrq"));
+  const r = suRate(rsrp, snr, rsrq);
+  const stab = suWindow(10), sd = Math.max(stdev(num1(stab, "rsrp")), stdev(num1(stab, "snr")));
+  $("#s-sub").textContent = (SU.smooth ? `Ø der letzten ${SU.smooth} s` : "Einzelwert (ungeglättet)") + ` · ${w.length} Messwert${w.length === 1 ? "" : "e"} · Takt ${SU.rate / 1000} s`.replace(".", ",");
+  const word = $("#s-word"), ic = $("#s-ricon"), sc = $("#s-score");
+  if (!r) { word.textContent = "Kein Empfang"; ic.replaceChildren(suIcon("bad", 40)); sc.textContent = ""; $("#s-limit").textContent = "Es liegen keine Signalwerte vor."; }
+  else {
+    word.textContent = r.label; ic.replaceChildren(suIcon(r.id, 40));
+    sc.replaceChildren(el("b", "tnum", fmt(r.score, 0)), document.createTextNode(" / 100 Punkte"));
+    $("#s-mk").style.left = Math.max(0, Math.min(100, r.score)) + "%";
+    const worst = r.limiting, names = SU.spec.limit_names;
+    $("#s-limit").textContent = r.score >= 85 ? "Alle Werte sind hervorragend – besser wird es kaum."
+      : `Schwächster Wert: ${names[worst]} – hier lässt sich am meisten gewinnen.`;
+  }
+  const put = (id, val, dec, unit, part) => {
+    $(`#s-${id}-v`).replaceChildren(document.createTextNode(fmt(val, dec)), el("small", "", unit));
+    const q = $(`#s-${id}-q`); q.replaceChildren();
+    if (part) { q.className = "q"; q.append(suIcon(part.id), document.createTextNode(part.label)); } else { q.className = "label"; q.textContent = "–"; }
+  };
+  put("rsrp", rsrp, 0, "dBm", r && r.parts.rsrp); put("snr", snr, 1, "dB", r && r.parts.snr); put("rsrq", rsrq, 0, "dB", r && r.parts.rsrq);
+  const sl = sd < 1.5 ? [0, "Sehr stabil"] : sd < 3 ? [0, "Stabil"] : sd < 5 ? [1, "Schwankend"] : [2, "Unruhig"];
+  $("#s-stab-v").replaceChildren(document.createTextNode("±" + fmt(sd, 1)), el("small", "", "dB (10 s)"));
+  const sq = $("#s-stab-q"); sq.className = "q"; sq.replaceChildren(levelIcon(LEVELS[sl[0]]), document.createTextNode(sl[1]));
+  const meta = $("#s-meta"); meta.replaceChildren();
+  const add = (k, v) => { if (v == null || v === "") return; const sp = el("span"); sp.append(document.createTextNode(k + " "), el("b", "", v)); meta.appendChild(sp); };
+  add("Netz", netLabel(last.net)); add("Band", last.band); add("PCI", last.pci); add("Bandbreite", last.bw ? last.bw + " MHz" : null); add("Funkzellen", last.cells); add("Anbieter", last.provider);
+  // Diagramme
+  const t1 = last.t, t0 = t1 - SU.window, sm = SU.buf.filter((x) => x.t >= t0);
+  const base = { t: sm.map((x) => x.t), since: t0, until: t1, bucket: SU.rate / 1000, marks: null };
+  suCharts.rsrp.set({ ...base, series: [{ label: "RSRP", color: S1, values: sm.map((x) => x.rsrp) }] });
+  suCharts.snr.set({ ...base, series: [{ label: "SINR", color: S1, values: sm.map((x) => x.snr) }] });
+  const rows = sm.slice(-60).reverse();
+  suCards.rsrp.fillTable(["Zeit", "RSRP (dBm)", "Bewertung"], rows.map((x) => [suHead(x.t), fmt(x.rsrp), x.label || "–"]));
+  suCards.snr.fillTable(["Zeit", "SINR (dB)", "Bewertung"], rows.map((x) => [suHead(x.t), fmt(x.snr, 1), x.label || "–"]));
+  $("#s-info").textContent = `Letzter Messwert ${suHead(last.t)}`;
+}
+
+/* Signalton: höher = besser */
+function suBeep(score) {
+  if (!SU.sound || !SU.ctx || score == null) return;
+  const c = SU.ctx, t = c.currentTime, o = c.createOscillator(), g = c.createGain();
+  o.type = "sine"; o.frequency.value = 200 + 1000 * Math.max(0, Math.min(100, score)) / 100;
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.12, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
+  o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + 0.14);
+}
+$("#s-sound").addEventListener("click", () => {
+  SU.sound = !SU.sound; $("#s-sound").setAttribute("aria-pressed", SU.sound);
+  $("#s-sound").textContent = SU.sound ? "🔊 Signalton an" : "🔈 Signalton";
+  if (SU.sound && !SU.ctx) { try { SU.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch { SU.sound = false; } }
+  if (SU.ctx && SU.ctx.state === "suspended") SU.ctx.resume();
+});
+async function suWake(on) {
+  try {
+    if (on && "wakeLock" in navigator) SU.wake = await navigator.wakeLock.request("screen");
+    else if (SU.wake) { await SU.wake.release(); SU.wake = null; }
+  } catch { $("#s-wake").checked = false; }
+}
+if (!("wakeLock" in navigator)) { $("#s-wake").disabled = true; $("#s-wake").parentElement.title = "Wird nur über HTTPS oder localhost unterstützt"; }
+$("#s-wake").addEventListener("change", (e) => suWake(e.target.checked));
+
+/* Messschleife */
+async function suTick() {
+  if (!SU.active || document.hidden) return;
+  const t0 = performance.now();
+  try {
+    const r = await getJSON(`/api/live?since=${SU.seq}`);
+    SU.spec = r.spec;
+    if (r.seq < SU.seq) { SU.buf = []; }
+    SU.seq = r.seq; SU.err = r.error;
+    for (const x of r.samples) { SU.buf.push(x); if (SU.measuring && x.rsrp != null) SU.measuring.samples.push(x); }
+    if (SU.buf.length > 1800) SU.buf.splice(0, SU.buf.length - 1800);
+    if (r.samples.length) suBeep(r.samples[r.samples.length - 1].score);
+    suRender(); suMeasureTick();
+  } catch (e) { SU.err = e.message; suRender(); }
+  if (SU.active) SU.timer = setTimeout(suTick, Math.max(50, SU.rate - (performance.now() - t0)));
+}
+function suStart() { if (SU.active) return; SU.active = true; suSpots(); suTick(); }
+function suStop() { SU.active = false; clearTimeout(SU.timer); if (SU.measuring) suCancel(); suWake(false); $("#s-wake").checked = false; }
+document.addEventListener("visibilitychange", () => {
+  if (routeState.cur !== "setup") return;
+  if (document.hidden) clearTimeout(SU.timer);
+  else if (SU.active) { clearTimeout(SU.timer); suTick(); if ($("#s-wake").checked) suWake(true); }
+});
+
+/* Bedienung */
+function suSeg(id, key, save = true) {
+  const box = $(id), mark = () => box.querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", Number(b.dataset.v) === SU[key]));
+  box.addEventListener("click", (e) => { const b = e.target.closest("button"); if (!b) return; SU[key] = Number(b.dataset.v); if (save) SU_SAVE(key, SU[key]); mark(); if (key === "rate" && SU.active) { clearTimeout(SU.timer); suTick(); } else suRender(); });
+  mark();
+}
+suSeg("#s-window", "window"); suSeg("#s-smooth", "smooth"); suSeg("#s-rate", "rate");
+
+/* Standortmessung */
+const spName = $("#sp-name"), spGo = $("#sp-go"), spStop = $("#sp-stop"), spProg = $("#sp-prog"), spLeft = $("#sp-left");
+function suUI(measuring) {
+  spGo.hidden = measuring; spStop.hidden = !measuring; spProg.hidden = !measuring; spName.disabled = measuring; $("#sp-dur").disabled = measuring;
+  if (!measuring) spLeft.textContent = "";
+}
+spGo.addEventListener("click", () => {
+  if (!SU.active || !SU.buf.length) { spLeft.textContent = "Noch keine Messwerte – einen Moment …"; return; }
+  const dur = Number($("#sp-dur").value), n = SU.spots.length + 1;
+  SU.measuring = { name: spName.value.trim() || `Standort ${n}`, dur, t0: Date.now(), samples: [] };
+  spProg.querySelector("i").style.width = "0%"; suUI(true);
+});
+spStop.addEventListener("click", () => suCancel());
+function suCancel() { SU.measuring = null; suUI(false); }
+async function suMeasureTick() {
+  const m = SU.measuring; if (!m) return;
+  const el_ = (Date.now() - m.t0) / 1000, left = Math.max(0, Math.ceil(m.dur - el_));
+  spProg.querySelector("i").style.width = Math.min(100, el_ / m.dur * 100) + "%"; spLeft.textContent = `${left} s · ${m.samples.length} Messwerte`;
+  if (el_ < m.dur) return;
+  SU.measuring = null;
+  try {
+    const r = await api("POST", "/api/spots", { name: m.name, duration: m.dur, samples: m.samples.map((x) => ({ rsrp: x.rsrp, snr: x.snr, rsrq: x.rsrq, rssi: x.rssi, net: x.net, band: x.band, pci: x.pci, bw: x.bw })) });
+    SU.spots = r.spots; spName.value = ""; suUI(false); suBeep(90); suSpotList(r.id);
+  } catch (e) { suUI(false); spLeft.textContent = e.message; }
+}
+async function suSpots() { try { SU.spots = (await getJSON("/api/spots")).spots; suSpotList(); } catch (e) { console.error(e); } }
+function suSpotList(newId) {
+  const box = $("#sp-list"); box.replaceChildren();
+  if (!SU.spots.length) { box.appendChild(el("p", "note", "Noch keine Standorte gemessen. Router aufstellen, Namen eingeben und „Messung starten“.")); return; }
+  const t = el("table"), th = el("thead"), tr = el("tr");
+  ["#", "Standort", "Bewertung", "Punkte", "RSRP", "SINR", "RSRQ", "Stabilität", "Netz", "Messung", ""].forEach((c, i) => tr.appendChild(el("th", i >= 3 && i <= 6 ? "num" : "", c))); th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody"), bestScore = SU.spots[0].rank_score;
+  SU.spots.forEach((s, i) => {
+    const row = el("tr"), name = el("td"), rate = el("td"), pts = el("td", "num");
+    row.appendChild(el("td", "", String(i + 1)));
+    name.appendChild(document.createTextNode(s.name));
+    if (i === 0 && SU.spots.length > 1) name.appendChild(el("span", "badge best-badge", "Beste Position"));
+    if (s.note) name.title = s.note;
+    rate.append(suIcon(s.level), document.createTextNode(" " + s.label)); rate.style.whiteSpace = "nowrap";
+    const track = el("span", "sbar-track"), bar = el("span", "sbar"); bar.style.width = Math.max(2, s.rank_score) + "%"; bar.style.background = suColor(s.level); track.appendChild(bar);
+    pts.append(track, document.createTextNode(fmt(s.rank_score, 0) + (i ? ` (${fmt(s.rank_score - bestScore, 0)})` : "")));
+    pts.style.whiteSpace = "nowrap";
+    const cell = (v) => el("td", "num", v);
+    const del = el("button", "btn sm", "×"); del.type = "button"; del.setAttribute("aria-label", `Standort ${s.name} löschen`);
+    del.onclick = async () => { try { SU.spots = (await api("POST", "/api/spots/delete", { id: s.id })).spots; suSpotList(); } catch (e) { alert(e.message); } };
+    const dt = el("td", "", `${s.duration} s · ${dateFmt.format(new Date(s.ts * 1000))}`); dt.style.color = "var(--ink-2)"; const dl = el("td"); dl.appendChild(del);
+    row.append(name, rate, pts, cell(`${fmt(s.rsrp)} dBm`), cell(s.snr == null ? "–" : `${fmt(s.snr, 1)} dB`), cell(s.rsrq == null ? "–" : `${fmt(s.rsrq)} dB`), el("td", "", `${s.stability} (±${fmt(Math.max(s.rsrp_std || 0, s.snr_std || 0), 1)})`), el("td", "", [netLabel(s.net), s.band].filter((x) => x && x !== "–").join(" ")), dt, dl);
+    if (s.id === newId) row.style.background = "var(--wash)";
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); box.appendChild(t);
+  const all = el("button", "btn sm", "Alle Messungen löschen"); all.type = "button"; all.style.marginTop = "10px";
+  all.onclick = async () => { if (confirm("Alle Standortmessungen löschen?")) { try { SU.spots = (await api("POST", "/api/spots/delete", { all: true })).spots; suSpotList(); } catch (e) { alert(e.message); } } };
+  box.appendChild(all);
+  box.appendChild(el("p", "hint", "Gesamtwertung = Ø-Bewertung minus halbe Schwankung: ein ruhiger Standort schlägt einen wechselhaften. In Klammern der Abstand zum besten Standort."));
+}
+
+/* ---------- Seitenwechsel (Hash-Routing) ---------- */
+const PAGES = ["dash", "analysis", "setup", "settings"];
+const PAGE_TITLE = { dash: "Dashboard", analysis: "Auswertung", setup: "Setup", settings: "Einstellungen" };
+const routeState = { cur: null };
+let lastDash = 0;
+const pageFromHash = () => { const h = location.hash.replace(/^#\/?/, ""); return PAGES.includes(h) ? h : "dash"; };
+function showPage(p) {
+  const prev = routeState.cur;
+  if (prev === "settings" && p !== "settings" && SET.dirty && !confirm("Nicht gespeicherte Änderungen verwerfen?")) { history.replaceState(null, "", "#/settings"); return; }
+  if (prev === "settings" && p !== "settings") markDirty(false);
+  if (prev === "setup" && p !== "setup") suStop();
+  routeState.cur = p;
+  for (const x of PAGES) $(`#page-${x}`).hidden = x !== p;
+  document.querySelectorAll(".tabs a").forEach((a) => (a.dataset.p === p ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  document.title = `${PAGE_TITLE[p]} – ZTE G5TS`;
+  $("#savebar").hidden = !(p === "settings" && SET.dirty);
+  window.scrollTo(0, 0);
+  if (p === "dash" && Date.now() - lastDash > 20000) { lastDash = Date.now(); reloadAll(); }
+  if (p === "analysis") { markA(); if (!A.data || Date.now() - A.loaded > 60000) loadAnalysis(); else renderAnalysis(); }
+  if (p === "setup") suStart();
+  if (p === "settings") loadSettings();
+}
+window.addEventListener("hashchange", () => showPage(pageFromHash()));
+
+async function tickCurrent() { try { renderCurrent(await getJSON("/api/current")); } catch (e) { $("#ptxt").textContent = "Dashboard-Server nicht erreichbar"; $("#pdot").className = "dot off"; } }
+
+/* Regelmäßige Aktualisierung: Takt aus den Einstellungen, nur bei sichtbarem Tab und passender Seite */
+function every(fn, secs) {
+  const run = async () => { try { if (!document.hidden) await fn(); } catch (e) { console.error(e); } setTimeout(run, Math.max(2, secs()) * 1000); };
+  setTimeout(run, Math.max(2, secs()) * 1000);
+}
+every(tickCurrent, () => uiRefresh);
+every(() => { if (routeState.cur === "dash" && !(zoom && zoom.to < nowSec() - 90)) { lastDash = Date.now(); return loadHistory(); } }, () => Math.max(15, uiRefresh * 6));
+every(() => { if (routeState.cur === "dash" && !zoom) return loadDaily(); }, () => Math.max(30, uiRefresh * 12));
+
+tickCurrent();
+showPage(pageFromHash());
+
+</script>
+</body>
+</html>

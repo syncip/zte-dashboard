@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Anmelden – ZTE G5TS Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232a78d6'/%3E%3Cpath d='M9 22v2M14 16v8M19 12v12M24 7v17' stroke='white' stroke-width='2.6' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<style>
+:root {
+  color-scheme: light;
+  --page: #f4f4f1; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e; --muted: #898781;
+  --border: rgba(11,11,11,.10); --wash: rgba(11,11,11,.05); --s1: #2a78d6; --crit: #d03b3b;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    color-scheme: dark; --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781;
+    --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06); --s1: #3987e5;
+  }
+}
+:root[data-theme="dark"] { color-scheme: dark; --page: #0d0d0d; --surface: #1a1a19; --ink: #fff; --ink-2: #c3c2b7; --muted: #898781; --border: rgba(255,255,255,.10); --wash: rgba(255,255,255,.06); --s1: #3987e5; }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--page); color: var(--ink);
+  font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.card { width: min(380px, 100%); background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 24px; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.logo { width: 36px; height: 36px; border-radius: 10px; background: var(--s1); display: grid; place-items: center; flex: none; }
+h1 { font-size: 18px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+p { margin: 1px 0 0; color: var(--ink-2); font-size: 13px; }
+label { display: block; font-size: 13px; font-weight: 600; margin: 4px 0 6px; }
+input[type=password] { width: 100%; font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+input:focus-visible, button:focus-visible { outline: 2px solid var(--s1); outline-offset: 2px; }
+button { width: 100%; margin-top: 14px; font: inherit; font-weight: 600; color: #fff; background: var(--s1); border: 0; border-radius: 10px; padding: 10px 12px; cursor: pointer; }
+button:disabled { opacity: .55; cursor: default; }
+.err { min-height: 20px; margin-top: 10px; font-size: 13px; color: var(--ink); display: flex; gap: 6px; align-items: center; }
+.err svg { color: var(--crit); flex: none; }
+</style>
+</head>
+<body>
+<main class="card">
+  <div class="brand">
+    <div class="logo" aria-hidden="true"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><path d="M5 18v2M10 13v7M15 9v11M20 4v16"/></svg></div>
+    <div><h1>ZTE G5TS Dashboard</h1><p>Bitte anmelden</p></div>
+  </div>
+  <form id="f" autocomplete="on">
+    <input type="text" name="username" value="dashboard" autocomplete="username" hidden>
+    <label for="pw">Passwort</label>
+    <input id="pw" name="password" type="password" autocomplete="current-password" autofocus required>
+    <button id="go" type="submit">Anmelden</button>
+    <div class="err" id="err" role="alert" aria-live="polite"></div>
+  </form>
+</main>
+<script>
+"use strict";
+try { const t = localStorage.getItem("zte-theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
+const f = document.getElementById("f"), err = document.getElementById("err"), go = document.getElementById("go");
+let timer = null;
+function show(msg) {
+  err.replaceChildren();
+  if (!msg) return;
+  const s = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  s.setAttribute("width", 14); s.setAttribute("height", 14); s.setAttribute("viewBox", "0 0 14 14"); s.setAttribute("aria-hidden", "true");
+  s.innerHTML = '<circle cx="7" cy="7" r="6.2" fill="currentColor"/><path d="M4.6 4.6l4.8 4.8M9.4 4.6L4.6 9.4" stroke="var(--surface)" stroke-width="1.7" stroke-linecap="round"/>';
+  err.append(s, document.createTextNode(msg));
+}
+function countdown(sec) {
+  clearInterval(timer); go.disabled = true;
+  const t0 = Date.now();
+  const tick = () => {
+    const left = Math.ceil(sec - (Date.now() - t0) / 1000);
+    if (left <= 0) { clearInterval(timer); go.disabled = false; show(""); return; }
+    show(`Zu viele Fehlversuche – bitte ${left} s warten`);
+  };
+  tick(); timer = setInterval(tick, 500);
+}
+f.addEventListener("submit", async (e) => {
+  e.preventDefault(); go.disabled = true; show("");
+  try {
+    const r = await fetch("/api/login", { method: "POST", cache: "no-store", headers: { "Content-Type": "application/json", "X-Requested-With": "zte-dash" },
+      body: JSON.stringify({ password: document.getElementById("pw").value }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok) { location.replace("/"); return; }
+    if (r.status === 429) { countdown(j.retry_after || 30); return; }
+    show(j.error || "Anmeldung fehlgeschlagen"); document.getElementById("pw").select();
+  } catch { show("Dashboard-Server nicht erreichbar"); }
+  go.disabled = false;
+});
+</script>
+</body>
+</html>

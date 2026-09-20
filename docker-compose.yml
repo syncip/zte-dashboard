@@ -1,0 +1,15 @@
+# Selbst bauen:      docker compose up -d --build
+# Fertiges Image:    in der Zeile "image:" den Kommentar entfernen und "build: ." löschen
+services:
+  zte-dash:
+    build: .
+    # image: r600/zte-dashboard:latest
+    container_name: zte-dash
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./data:/data
+    env_file:
+      - path: .env
+        required: false        # Alles lässt sich auch im Dashboard unter "Einstellungen" eintragen
