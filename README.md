@@ -137,6 +137,13 @@ Neue SMS erscheinen auch in der Ereignisliste. Gelöschte SMS verschwinden im Da
 - Die Schnittstelle des Routers (ubus-Objekt `zwrt_wms`: `zte_libwms_get_sms_data`, `zte_libwms_send_sms`, `zwrt_wms_delete_sms`) ist nach der Beschreibung aus der Community umgesetzt und
   mit dem Mock-Router getestet, **aber noch nicht an einem echten G5TS**. Vor dem ersten Einsatz: `python zte_dash.py --probe-sms` (zeigt Methoden und Aufbau der Antworten ohne Nachrichtentexte),
   dann im Dashboard „Jetzt abrufen“ und zuerst eine SMS an die eigene Handynummer senden.
+- **Verschlüsselte SMS-Felder:** Neuere Firmware (z. B. G5TS/MC8830) verschlüsselt Rufnummer und Text auf der ubus-Schnittstelle mit AES-256-GCM. Das Dashboard macht denselben
+  Schlüsselaustausch wie die Weboberfläche (RSA-Schlüssel des Routers holen, zufälligen Sitzungsschlüssel übergeben) – komplett in Python, ohne zusätzliche Pakete.
+  Der Schlüssel gilt je Router-Sitzung und wird nach jedem neuen Login automatisch neu ausgehandelt. Firmware ohne Verschlüsselung wird erkannt und im Klartext bedient.
+  Hinweis: Öffnest du gleichzeitig die SMS-Seite der Router-Weboberfläche, kann es sein, dass dort kurz keine Texte erscheinen (Seite neu laden).
+- Meldet der Router beim Senden „ubus-Status 2“ (ungültige Argumente), probiert das Dashboard nacheinander mehrere Schreibweisen der Argumente (Zeitzone in Stunden oder Viertelstunden,
+  Trennzeichen, id). Bei „Status 2“ wird dabei nie etwas gesendet; die erste akzeptierte Variante wird gemerkt. `--test-sms NUMMER` zeigt alle Versuche.
+- Zeitangaben der Nachrichten liest das Dashboard als Viertelstunden-Zeitzone (`+8` = MESZ); früher falsch gelesene oder verschlüsselt importierte Einträge werden beim nächsten Abruf automatisch berichtigt.
 
 ### SMS-API für Skripte und Smart Home
 
@@ -186,6 +193,7 @@ Export: `/api/export.csv?range=30d&kind=signal|ping` (auch mit `from`/`to`; Link
 
     python3 zte_dash.py --probe
     python3 zte_dash.py --probe-sms     # SMS-Schnittstelle des Routers
+    python3 zte_dash.py --test-sms +491701234567   # EINE Test-SMS senden und zeigen, welche Schreibweise der Router akzeptiert
 
 Loggt sich ein und listet, was der Router liefert (Antwort von `get_wwandst`, verfügbare ubus-Objekte).
 Wenn der Datenverbrauch leer bleibt: Ausgabe von `--probe` schicken, dann lässt sich der Parser anpassen.

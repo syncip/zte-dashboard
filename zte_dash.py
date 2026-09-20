@@ -566,6 +566,207 @@ def target_label(t):
 
 
 # --------------------------------------------------------------------------- #
+# Kleine Krypto-Helfer in reinem Python (die Router-Firmware verschlüsselt SMS-Felder mit AES-256-GCM;
+# der Sitzungsschlüssel wird per RSA übergeben). Nur für wenige hundert Byte gedacht, nicht für Massendaten.
+# --------------------------------------------------------------------------- #
+def _aes_tables():
+    sbox = [0] * 256
+    p = q = 1
+    while True:
+        p = (p ^ ((p << 1) & 0xFF) ^ (0x1B if p & 0x80 else 0)) & 0xFF        # p * 3
+        q ^= (q << 1) & 0xFF
+        q ^= (q << 2) & 0xFF
+        q ^= (q << 4) & 0xFF
+        if q & 0x80:
+            q ^= 0x09                                                       # q / 3
+        rot = lambda v, n: ((v << n) | (v >> (8 - n))) & 0xFF
+        sbox[p] = (q ^ rot(q, 1) ^ rot(q, 2) ^ rot(q, 3) ^ rot(q, 4) ^ 0x63) & 0xFF
+        if p == 1:
+            break
+    sbox[0] = 0x63
+    return sbox
+
+
+_SBOX = _aes_tables()
+
+
+def _aes_expand(key):
+    nk = len(key) // 4
+    if len(key) not in (16, 24, 32):
+        raise ValueError("AES-Schlüssel muss 16, 24 oder 32 Byte lang sein")
+    nr = nk + 6
+    w = [list(key[4 * i:4 * i + 4]) for i in range(nk)]
+    rcon = 1
+    for i in range(nk, 4 * (nr + 1)):
+        t = list(w[i - 1])
+        if i % nk == 0:
+            t = [_SBOX[b] for b in t[1:] + t[:1]]
+            t[0] ^= rcon
+            rcon = ((rcon << 1) ^ (0x11B if rcon & 0x80 else 0)) & 0xFF
+        elif nk > 6 and i % nk == 4:
+            t = [_SBOX[b] for b in t]
+        w.append([a ^ b for a, b in zip(w[i - nk], t)])
+    return [sum(w[4 * r:4 * r + 4], []) for r in range(nr + 1)], nr
+
+
+def _xtime(a):
+    return ((a << 1) ^ 0x1B) & 0xFF if a & 0x80 else a << 1
+
+
+def _aes_block(rk_nr, block):
+    rk, nr = rk_nr
+    s = [b ^ k for b, k in zip(block, rk[0])]
+    for r in range(1, nr + 1):
+        s = [_SBOX[b] for b in s]
+        s = [s[(i + 4 * (i % 4)) % 16] for i in range(16)]                  # ShiftRows (Spalten-Reihenfolge)
+        if r != nr:
+            o = []
+            for c in range(0, 16, 4):
+                a0, a1, a2, a3 = s[c:c + 4]
+                t = a0 ^ a1 ^ a2 ^ a3
+                o += [a0 ^ t ^ _xtime(a0 ^ a1), a1 ^ t ^ _xtime(a1 ^ a2), a2 ^ t ^ _xtime(a2 ^ a3), a3 ^ t ^ _xtime(a3 ^ a0)]
+            s = o
+        s = [b ^ k for b, k in zip(s, rk[r])]
+    return bytes(s)
+
+
+def _gmul(x, y):
+    z, v = 0, y
+    for i in range(127, -1, -1):
+        if (x >> i) & 1:
+            z ^= v
+        v = (v >> 1) ^ (0xE1 << 120) if v & 1 else v >> 1
+    return z
+
+
+def _ghash(h, aad, ct):
+    y = 0
+    data = aad + b"\0" * (-len(aad) % 16) + ct + b"\0" * (-len(ct) % 16) + (len(aad) * 8).to_bytes(8, "big") + (len(ct) * 8).to_bytes(8, "big")
+    for i in range(0, len(data), 16):
+        y = _gmul(y ^ int.from_bytes(data[i:i + 16], "big"), h)
+    return y
+
+
+def _gcm_crypt(rk, iv, data):
+    out = bytearray()
+    for n in range(0, len(data), 16):
+        ctr = iv + (n // 16 + 2).to_bytes(4, "big")
+        ks = _aes_block(rk, ctr)
+        out += bytes(a ^ b for a, b in zip(data[n:n + 16], ks))
+    return bytes(out)
+
+
+def aes_gcm_encrypt(key, iv, plain, aad=b""):
+    """AES-GCM (IV 12 Byte). Rückgabe: (Chiffrat, Tag 16 Byte)."""
+    rk = _aes_expand(key)
+    h = int.from_bytes(_aes_block(rk, b"\0" * 16), "big")
+    ct = _gcm_crypt(rk, iv, plain)
+    tag = int.from_bytes(_aes_block(rk, iv + b"\0\0\0\1"), "big") ^ _ghash(h, aad, ct)
+    return ct, tag.to_bytes(16, "big")
+
+
+def aes_gcm_decrypt(key, iv, ct, tag, aad=b""):
+    rk = _aes_expand(key)
+    h = int.from_bytes(_aes_block(rk, b"\0" * 16), "big")
+    want = (int.from_bytes(_aes_block(rk, iv + b"\0\0\0\1"), "big") ^ _ghash(h, aad, ct)).to_bytes(16, "big")
+    if not hmac.compare_digest(want, tag):
+        raise ValueError("GCM-Tag stimmt nicht (falscher Schlüssel?)")
+    return _gcm_crypt(rk, iv, ct)
+
+
+def _der_tlv(buf, pos):
+    tag = buf[pos]
+    ln = buf[pos + 1]
+    pos += 2
+    if ln & 0x80:
+        n = ln & 0x7F
+        ln = int.from_bytes(buf[pos:pos + n], "big")
+        pos += n
+    if pos + ln > len(buf):
+        raise ValueError("DER: Länge außerhalb")
+    return tag, pos, pos + ln
+
+
+def _der_find_rsa(buf, depth=0):
+    """Sucht in (verschachteltem) DER die Folge SEQUENCE{INTEGER n, INTEGER e}: klappt für PKCS#1, X.509-Schlüssel und Zertifikate."""
+    pos = 0
+    while pos < len(buf):
+        try:
+            tag, a, b = _der_tlv(buf, pos)
+        except (IndexError, ValueError):
+            return None
+        if tag == 0x30:
+            ints, p2, ok = [], a, True
+            while p2 < b and ok:
+                try:
+                    t2, a2, b2 = _der_tlv(buf, p2)
+                except (IndexError, ValueError):
+                    ok = False
+                    break
+                if t2 == 0x02:
+                    ints.append(int.from_bytes(buf[a2:b2], "big"))
+                    p2 = b2
+                else:
+                    ok = False
+            if ok and len(ints) == 2 and ints[0].bit_length() >= 512:
+                return ints[0], ints[1]
+        if depth < 8 and (tag & 0x20 or tag == 0x03):
+            inner = buf[a + 1:b] if tag == 0x03 else buf[a:b]
+            found = _der_find_rsa(inner, depth + 1)
+            if found:
+                return found
+        pos = b
+    return None
+
+
+def rsa_parse_public(text):
+    """PEM (Public Key, RSA Public Key oder Zertifikat) oder reines Base64/DER -> (n, e)."""
+    import base64
+    raw = str(text or "").strip()
+    body = re.sub(r"-----[^-]+-----", "", raw)
+    body = re.sub(r"\s+", "", body.replace("\\n", ""))
+    try:
+        der = base64.b64decode(body + "=" * (-len(body) % 4))
+    except ValueError as exc:
+        raise ValueError("Öffentlicher Schlüssel nicht lesbar") from exc
+    found = _der_find_rsa(der)
+    if not found:
+        raise ValueError("Kein RSA-Schlüssel im Zertifikat gefunden")
+    return found
+
+
+def rsa_encrypt_pkcs1(data, n, e):
+    k = (n.bit_length() + 7) // 8
+    if len(data) > k - 11:
+        raise ValueError("Daten zu lang für den RSA-Schlüssel")
+    ps = bytearray()
+    while len(ps) < k - 3 - len(data):
+        ps += bytes(b for b in os.urandom(k) if b)
+    em = b"\0\2" + bytes(ps[:k - 3 - len(data)]) + b"\0" + data
+    return pow(int.from_bytes(em, "big"), e, n).to_bytes(k, "big")
+
+
+def wms_seal(key, plain):
+    """Feld für den Router verschlüsseln: Base64(IV 12 | Tag 16 | Chiffrat) wie die Weboberfläche."""
+    import base64
+    iv = os.urandom(12)
+    ct, tag = aes_gcm_encrypt(key, iv, plain.encode("latin-1", "replace"))
+    return base64.b64encode(iv + tag + ct).decode()
+
+
+def wms_open(key, value):
+    """Umkehrung von wms_seal. ValueError, wenn das kein passender verschlüsselter Wert ist."""
+    import base64
+    try:
+        raw = base64.b64decode(str(value) + "=" * (-len(str(value)) % 4), validate=True)
+    except ValueError as exc:
+        raise ValueError("kein Base64") from exc
+    if len(raw) < 28:
+        raise ValueError("zu kurz")
+    return aes_gcm_decrypt(key, raw[:12], raw[28:], raw[12:28]).decode("latin-1")
+
+
+# --------------------------------------------------------------------------- #
 # Router-Client (ubus JSON-RPC)
 # --------------------------------------------------------------------------- #
 class RouterError(Exception):
@@ -590,6 +791,8 @@ class Router:
         self.login_paused_until = 0.0
         self.login_state = "none" if not (cfg.password or cfg.session) else "pending"
         self.login_error = None
+        self._enkey = None
+        self._enkey_sid = None
         self.lock = threading.RLock()
 
     @property
@@ -604,6 +807,7 @@ class Router:
         """Host oder Passwort wurden geändert: Sitzung verwerfen, Sperrzähler zurücksetzen."""
         with self.lock:
             self.sid = self.cfg.session or None
+            self._enkey = None
             self.usage_args = None
             self.login_failures = 0
             self.login_paused_until = 0.0
@@ -725,36 +929,170 @@ class Router:
         return self.call_auth("zte_nwinfo_api", "nwinfo_set_netselect", {"net_select": value})
 
     def list_methods(self, obj):
-        """ubus 'list': Methoden eines Objekts (nur für die Diagnose)."""
-        resp = self._post([{"jsonrpc": "2.0", "id": 1, "method": "list", "params": [self.sid or ANON_SID, obj]}])
-        item = resp[0] if isinstance(resp, list) and resp else resp
-        return (item or {}).get("result") or []
+        """ubus 'list': Methoden samt Argumentnamen eines Objekts (Diagnose und Versand). Je nach Firmware
+        erwartet der Aufruf [Session, Objekt], nur [Objekt] oder gar nichts; alle Formen werden probiert."""
+        found = None
+        for params in ([self.sid or ANON_SID, obj], [obj], [self.sid or ANON_SID], []):
+            try:
+                resp = self._post([{"jsonrpc": "2.0", "id": 1, "method": "list", "params": params}])
+            except (RouterError, OSError, ValueError):
+                continue
+            item = resp[0] if isinstance(resp, list) and resp else resp
+            res = (item or {}).get("result") if isinstance(item, dict) else None
+            if isinstance(res, list) and len(res) > 1 and isinstance(res[1], dict):
+                res = res[1]
+            if isinstance(res, dict) and isinstance(res.get(obj), dict):
+                return res[obj]
+            if isinstance(res, dict) and res and all(isinstance(v, dict) for v in res.values()) and found is None:
+                found = res
+        return found or {}
 
-    # -- SMS (ubus-Objekt zwrt_wms) --------------------------------------------------- #
+    # -- SMS (ubus-Objekt zwrt_wms) ---------------------------------------------------- #
+    # Neuere Firmware verschlüsselt Rufnummer und Text (AES-256-GCM). Ablauf wie in der Weboberfläche:
+    # 1. Öffentlichen RSA-Schlüssel holen (web_crt_get), 2. zufälligen 32-Byte-Schlüssel erzeugen und RSA-verschlüsselt
+    # per web_http_enstr_set an den Router geben, 3. Felder number/message_body damit verschlüsseln.
+    def _relogin(self):
+        self.sid = None if not (self.cfg.session and not self.cfg.password) else self.sid
+        self._enkey = None
+        self.login()
+
+    def _wms_key(self):
+        """Sitzungsschlüssel für die SMS-Felder. b'' bedeutet: Firmware ohne Verschlüsselung (Klartext)."""
+        with self.lock:
+            if not self.sid:
+                self.login()
+            if self._enkey is not None and self._enkey_sid == self.sid:
+                return self._enkey
+            try:
+                crt = self.call("zwrt_web", "web_crt_get", {}, sid=self.sid).get("result")
+            except AccessDenied:
+                raise
+            except RouterError as exc:
+                if "not found" in str(exc).lower():        # Firmware ohne Feldverschlüsselung
+                    self._enkey, self._enkey_sid = b"", self.sid
+                    return self._enkey
+                raise
+            if not crt:
+                raise RouterError("Router lieferte keinen öffentlichen Schlüssel (web_crt_get)")
+            try:
+                n, e = rsa_parse_public(crt)
+            except ValueError as exc:
+                raise RouterError(f"Öffentlicher Schlüssel des Routers nicht lesbar: {exc}") from exc
+            key_hex = secrets.token_hex(32)
+            import base64
+            enc = base64.b64encode(rsa_encrypt_pkcs1(key_hex.encode(), n, e)).decode()
+            self.call("zwrt_web", "web_http_enstr_set", {"web_enstr": enc}, sid=self.sid)
+            self._enkey, self._enkey_sid = bytes.fromhex(key_hex), self.sid
+            log.info("SMS-Verschlüsselung eingerichtet")
+            return self._enkey
+
+    def _wms(self, method, args):
+        """zwrt_wms-Aufruf mit Login, Schlüsselaustausch und genau einem Re-Login bei abgelaufener Sitzung."""
+        with self.lock:
+            for attempt in (0, 1):
+                try:
+                    self._wms_key()
+                    return self.call("zwrt_wms", method, args(self._enkey) if callable(args) else args, sid=self.sid)
+                except AccessDenied:
+                    if attempt:
+                        raise
+                    self._relogin()
+
+    def _wms_plain(self, m):
+        """Felder number/content einer Router-Nachricht entschlüsseln (falls nötig)."""
+        m = dict(m)
+        key = self._enkey
+        for f in ("number", "content"):
+            v = m.get(f)
+            if not key or v in (None, ""):
+                continue
+            try:
+                m[f] = wms_open(key, v)
+            except ValueError:
+                if not re.fullmatch(r"[0-9A-Fa-f+]*", str(v)):       # Klartext (alte Nachrichten) bleibt; sonst Schlüsselproblem
+                    raise RouterError("SMS-Feld konnte nicht entschlüsselt werden (Sitzungsschlüssel passt nicht)")
+        num = str(m.get("number") or "")
+        if num and len(num) % 4 == 0 and re.fullmatch(r"[0-9A-Fa-f]+", num):          # Nummer als UTF-16-Hex
+            try:
+                dec = bytes.fromhex(num).decode("utf-16-be")
+                if dec and all(0x20 <= ord(c) < 0x7F for c in dec):
+                    m["number"] = dec
+            except (ValueError, UnicodeDecodeError):
+                pass
+        return m
+
     def sms_list(self):
-        d = self.call_auth("zwrt_wms", "zte_libwms_get_sms_data",
-                           {"page": 0, "data_per_page": 500, "mem_store": 1, "tags": 10, "order_by": "order by id desc"})
+        d = self._wms("zte_libwms_get_sms_data",
+                      {"page": 0, "data_per_page": 500, "mem_store": 1, "tags": 10, "order_by": "order by id desc"})
         for k in ("messages", "messages_data", "sms_data"):
             if isinstance(d.get(k), list):
-                return d[k]
+                return [self._wms_plain(m) for m in d[k]]
         return []
 
-    def sms_send(self, number, text, plan, ts):
+    @staticmethod
+    def _sms_time(ts, sep=";", quarter=False):
+        """Wie die Weboberfläche: 'JJ;MM;TT;hh;mm;ss;+2' (Zeitzone in Stunden). quarter=True: Viertelstunden (+8)."""
         lt = datetime.fromtimestamp(ts).astimezone()
-        off = lt.utcoffset().total_seconds() / 3600
+        off = lt.utcoffset().total_seconds() / (900 if quarter else 3600)
         tz = "0" if off == 0 else (f"+{off:g}" if off > 0 else f"{off:g}")
-        sms_time = ";".join([lt.strftime("%y"), lt.strftime("%m"), lt.strftime("%d"), lt.strftime("%H"), lt.strftime("%M"),
-                             lt.strftime("%S"), tz])
-        return self.call_auth("zwrt_wms", "zte_libwms_send_sms",
-                              {"number": number, "sms_time": sms_time, "message_body": sms_hex(text), "id": "-1",
-                               "encode_type": plan["encoding"]})
+        return sep.join([lt.strftime("%y"), lt.strftime("%m"), lt.strftime("%d"), lt.strftime("%H"), lt.strftime("%M"),
+                         lt.strftime("%S"), tz])
+
+    def _sms_send_variants(self, number, text, plan, ts):
+        """Argumentsätze für zte_libwms_send_sms, wahrscheinlichster zuerst (nachgebaut aus der Weboberfläche des Routers).
+        Nur bei 'ubus-Status 2' (ungültige Argumente, dann wird nichts gesendet) folgt die nächste Schreibweise."""
+        key = self._wms_key()
+        hexed = sms_hex(text)
+        seal = (lambda v: wms_seal(key, v)) if key else (lambda v: v)
+        out = []
+        for idv in ("-1", ""):
+            for quarter in (False, True):
+                for sep in (";", ","):
+                    out.append({"number": seal(number), "sms_time": self._sms_time(ts, sep, quarter),
+                                "message_body": seal(hexed), "id": idv, "encode_type": plan["encoding"]})
+        if key:                                    # zuletzt: Klartext, falls die Firmware doch keine Verschlüsselung verlangt
+            out.append({"number": number, "sms_time": self._sms_time(ts), "message_body": hexed, "id": "-1",
+                        "encode_type": plan["encoding"]})
+        return out
+
+    def sms_send(self, number, text, plan, ts):
+        """Sendet eine SMS. Bei 'ubus-Status 2' (ungültige Argumente) wird nichts gesendet; dann folgt die nächste
+        Schreibweise. Die erste akzeptierte wird für weitere SMS gemerkt."""
+        last = None
+        with self.lock:
+            for attempt in (0, 1):
+                variants = self._sms_send_variants(number, text, plan, ts)
+                cached = getattr(self, "_sms_send_idx", None)
+                order = ([cached] if cached is not None and cached < len(variants) else []) + \
+                        [i for i in range(len(variants)) if i != cached]
+                try:
+                    for i in order:
+                        try:
+                            res = self.call("zwrt_wms", "zte_libwms_send_sms", variants[i], sid=self.sid)
+                        except AccessDenied:
+                            raise
+                        except RouterError as exc:
+                            if "ubus-Status 2" not in str(exc):
+                                raise
+                            last = exc
+                            continue
+                        self._sms_send_idx = i
+                        log.info("SMS-Versand: Schreibweise #%d angenommen", i + 1)
+                        return res
+                    break
+                except AccessDenied:
+                    if attempt:
+                        raise
+                    self._relogin()
+        raise RouterError(f"{last or 'zwrt_wms.zte_libwms_send_sms: ungültige Argumente'} - der Router lehnt alle bekannten "
+                          f"Schreibweisen ab. Bitte 'python zte_dash.py --test-sms NUMMER' ausführen und die Ausgabe schicken.")
 
     def sms_send_state(self, timeout=12):
         """Wartet auf den Versandstatus des Routers. True = gesendet, False = fehlgeschlagen, None = unklar."""
         end = time.time() + timeout
         while time.time() < end:
             try:
-                d = self.call_auth("zwrt_wms", "zwrt_wms_get_cmd_status", {"sms_cmd": 4})
+                d = self._wms("zwrt_wms_get_cmd_status", {"sms_cmd": 4})
             except RouterError:
                 return None
             v = str(d.get("sms_cmd_status_result", d.get("result", ""))).strip().lower()
@@ -768,7 +1106,7 @@ class Router:
     def sms_delete(self, ids):
         ids = [str(i) for i in ids if str(i).strip()]
         if ids:
-            return self.call_auth("zwrt_wms", "zwrt_wms_delete_sms", {"id": ";".join(ids) + ";"})
+            return self._wms("zwrt_wms_delete_sms", {"id": ";".join(ids) + ";"})
         return {}
 
 
@@ -973,16 +1311,14 @@ def sms_fp(box, number, ts, text):
 
 
 def parse_sms_date(raw, default):
-    """'24,05,12,14,30,00,+2' (auch mit ;) -> Unix-Zeit. Die Zeitzone gilt in Stunden (Viertelstunden werden erkannt)."""
+    """'26,09,20,11,14,24,+8' (auch mit ;) -> Unix-Zeit. Die Zeitzone steht wie im SMS-Standard (3GPP) in
+    Viertelstunden: +8 = UTC+2 (MESZ), +4 = UTC+1 (MEZ)."""
     try:
         p = [x.strip() for x in re.split(r"[,;]", str(raw)) if x.strip() != ""]
         y, mo, d, h, mi, se = (int(p[i]) for i in range(6))
         dt = datetime(y + 2000 if y < 100 else y, mo, d, h, mi, se)
         if len(p) > 6:
-            tz = float(p[6])
-            if abs(tz) > 14:
-                tz /= 4
-            return int(calendar.timegm(dt.timetuple()) - tz * 3600)
+            return int(calendar.timegm(dt.timetuple()) - float(p[6]) * 900)
         return int(dt.timestamp())
     except (ValueError, IndexError, OverflowError, OSError):
         return default
@@ -1550,6 +1886,17 @@ class SmsService(threading.Thread):
                     rid = str(m.get("id") or "")
                     fp = sms_fp(box, number, ts, text)
                     row = conn.execute("SELECT id, status FROM sms WHERE fp=?", (fp,)).fetchone()
+                    if not row and rid:                 # früher falsch gelesene Einträge (Zeitzone / verschlüsselte Felder) berichtigen
+                        old = conn.execute("SELECT id, status FROM sms WHERE router_id=? AND box=? AND source='router' "
+                                           "AND ((nkey=? AND text=?) OR LENGTH(number)>=40)",
+                                           (rid, box, sms_nkey(number), text)).fetchone()
+                        if old:
+                            try:
+                                conn.execute("UPDATE sms SET number=?, nkey=?, text=?, ts=?, fp=? WHERE id=?",
+                                             (number, sms_nkey(number), text, ts, fp, old["id"]))
+                                row = old
+                            except sqlite3.IntegrityError:
+                                pass
                     if not row and box == "out":       # eigene, über das Dashboard gesendete Nachricht wiedererkennen
                         row = conn.execute("SELECT id, status FROM sms WHERE box='out' AND nkey=? AND text=? AND ABS(ts-?)<=180 "
                                            "AND router_id IS NULL ORDER BY ABS(ts-?) LIMIT 1", (sms_nkey(number), text, ts, ts)).fetchone()
@@ -2933,7 +3280,7 @@ def probe(cfg):
 
 
 def probe_sms(cfg):
-    """Diagnose der SMS-Schnittstelle: zeigt Methoden und Aufbau der Antworten (ohne Nachrichtentexte)."""
+    """Diagnose der SMS-Schnittstelle: zeigt Aufbau der Antworten (ohne Nachrichteninhalte)."""
     r = Router(cfg)
     if not r.can_login:
         print("Kein Router-Passwort gesetzt (ZTE_PASSWORD oder Dashboard-Einstellungen).")
@@ -2941,26 +3288,68 @@ def probe_sms(cfg):
     r.login()
     print("Login OK")
     try:
-        print("zwrt_wms Methoden:", json.dumps(r.list_methods("zwrt_wms")))
-    except RouterError as exc:
-        print("zwrt_wms list -> FEHLER:", exc)
+        key = r._wms_key()
+        print("SMS-Feldverschlüsselung:", "aktiv (AES-GCM, Schlüsselaustausch OK)" if key else "nicht nötig (Klartext)")
+    except (RouterError, ValueError) as exc:
+        print("SMS-Feldverschlüsselung -> FEHLER:", exc)
     for meth, args in (("zwrt_wms_get_wms_capacity", {}), ("zwrt_get_wms_nvitems", {})):
         try:
             print(f"{meth} ->", json.dumps(r.call("zwrt_wms", meth, args, sid=r.sid))[:400])
         except RouterError as exc:
             print(f"{meth} -> FEHLER: {exc}")
     try:
-        d = r.call("zwrt_wms", "zte_libwms_get_sms_data",
-                   {"page": 0, "data_per_page": 500, "mem_store": 1, "tags": 10, "order_by": "order by id desc"}, sid=r.sid)
-        print("zte_libwms_get_sms_data -> Schlüssel:", list(d.keys()))
-        msgs = next((d[k] for k in ("messages", "messages_data", "sms_data") if isinstance(d.get(k), list)), [])
-        print(f"{len(msgs)} Nachrichten; Tags:", dict(Counter(str(m.get('tag')) for m in msgs)))
-        for m in msgs[:3]:
+        msgs = r.sms_list()
+        print("zte_libwms_get_sms_data ->", f"{len(msgs)} Nachrichten; Tags:", dict(Counter(str(m.get('tag')) for m in msgs)))
+
+        def shape(v):        # nur die Form zeigen, nie Inhalte: Ziffern -> 9, Buchstaben -> a
+            return re.sub(r"[A-Za-z]", "a", re.sub(r"[0-9]", "9", str(v)))[:60]
+        for m in msgs[:5]:
             print("  Felder:", {k: (f"<{len(str(v))} Zeichen>" if k in ("content", "number") else v) for k, v in m.items()})
-            print("  Datum roh:", m.get("date"), "->", parse_sms_date(m.get("date"), None))
+            print("  Form number :", shape(m.get("number")))
+            print("  Text lesbar :", bool(sms_unhex(m.get("content"))), "| Länge:", len(sms_unhex(m.get("content"))))
+            print("  Datum roh:", m.get("date"), "->", sms_iso(parse_sms_date(m.get("date"), 0)))
     except RouterError as exc:
         print("zte_libwms_get_sms_data -> FEHLER:", exc)
     return 0
+
+
+def test_sms(cfg, number):
+    """Sendet EINE Test-SMS und zeigt für jede probierte Schreibweise der Argumente die Antwort des Routers."""
+    r = Router(cfg)
+    if not r.can_login:
+        print("Kein Router-Passwort gesetzt (ZTE_PASSWORD oder Dashboard-Einstellungen).")
+        return 1
+    try:
+        number = sms_number(number)
+    except SmsError as exc:
+        print("Nummer ungültig:", exc)
+        return 1
+    r.login()
+    text = "Test vom ZTE-Dashboard"
+    plan = sms_plan(text)
+    try:
+        key = r._wms_key()
+    except (RouterError, ValueError) as exc:
+        print("Schlüsselaustausch fehlgeschlagen:", exc)
+        return 2
+    print("SMS-Feldverschlüsselung:", "aktiv" if key else "aus (Klartext)")
+    variants = r._sms_send_variants(number, text, plan, int(time.time()))
+    print(f"{len(variants)} Schreibweisen werden nacheinander probiert - bei 'Status 2' wird nichts gesendet.\n")
+    for i, args in enumerate(variants, 1):
+        shown = {k: ("<verschlüsselt>" if (k in ("number", "message_body") and key and len(str(v)) > 30) else
+                     ("<geheim>" if k in ("number", "message_body") else v)) for k, v in args.items()}
+        try:
+            res = r.call("zwrt_wms", "zte_libwms_send_sms", args, sid=r.sid)
+        except RouterError as exc:
+            print(f"{i:2d}. {shown} -> {exc}")
+            if "ubus-Status 2" not in str(exc):
+                return 2
+            continue
+        print(f"{i:2d}. {shown} -> ANGENOMMEN: {json.dumps(res)}")
+        print("Versandstatus:", r.sms_send_state())
+        return 0
+    print("\nKeine Schreibweise wurde akzeptiert.")
+    return 2
 
 
 def test_reconnect(cfg):
@@ -2983,6 +3372,7 @@ def main():
     ap.add_argument("--probe", action="store_true", help="Router-Antworten anzeigen (Diagnose)")
     ap.add_argument("--once", action="store_true", help="Einmal abfragen, speichern, ausgeben, beenden")
     ap.add_argument("--probe-sms", action="store_true", help="SMS-Schnittstelle des Routers prüfen (Diagnose)")
+    ap.add_argument("--test-sms", metavar="NUMMER", help="Eine Test-SMS an NUMMER senden und die Antworten des Routers zeigen (Diagnose)")
     ap.add_argument("--test-reconnect", action="store_true", help="Verbindung einmalig neu aufbauen (mit Rückfrage)")
     ap.add_argument("--reset-auth", action="store_true", help="Dashboard-Passwortschutz abschalten (falls das Passwort vergessen wurde)")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -3006,6 +3396,12 @@ def main():
     if args.probe_sms:
         try:
             sys.exit(probe_sms(cfg))
+        except RouterError as exc:
+            print("FEHLER:", exc)
+            sys.exit(1)
+    if args.test_sms:
+        try:
+            sys.exit(test_sms(cfg, args.test_sms))
         except RouterError as exc:
             print("FEHLER:", exc)
             sys.exit(1)
