@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>zte-dashboard</Name>
+  <Repository>r600/zte-dashboard:latest</Repository>
+  <Registry>https://hub.docker.com/r/r600/zte-dashboard</Registry>
+  <Network>bridge</Network>
+  <MyIP/>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support/>
+  <Overview>Dashboard für den ZTE G5TS / MC8830 (Aldi Talk): Signalqualität, Datenverbrauch, Latenz, Ausfälle, Watchdog und Setup-Hilfe für den Router-Standort. Alle Einstellungen im Dashboard.</Overview>
+  <Category>Tools: Network:Other</Category>
+  <WebUI>http://[IP]:[PORT:8080]/</WebUI>
+  <TemplateURL/>
+  <Icon/>
+  <ExtraParams>--restart=unless-stopped</ExtraParams>
+  <Config Name="WebUI Port" Target="8080" Default="8080" Mode="tcp" Description="Port des Dashboards (falls 8080 belegt ist, links einen anderen wählen)" Type="Port" Display="always" Required="true" Mask="false">8080</Config>
+  <Config Name="Daten (Datenbank)" Target="/data" Default="/mnt/user/appdata/zte-dashboard" Mode="rw" Description="Hier liegt die SQLite-Datenbank. Nicht löschen!" Type="Path" Display="always" Required="true" Mask="false">/mnt/user/appdata/zte-dashboard</Config>
+  <Config Name="Router-Adresse" Target="ZTE_HOST" Default="http://192.168.168.1" Mode="" Description="Adresse des ZTE-Routers" Type="Variable" Display="always" Required="false" Mask="false">http://192.168.168.1</Config>
+  <Config Name="Router-Passwort" Target="ZTE_PASSWORD" Default="" Mode="" Description="Optional – kann auch später im Dashboard unter Einstellungen eingetragen werden" Type="Variable" Display="always" Required="false" Mask="true"/>
+  <Config Name="Zeitzone" Target="TZ" Default="Europe/Berlin" Mode="" Description="Wichtig für die Auswertung nach Tageszeit" Type="Variable" Display="advanced" Required="false" Mask="false">Europe/Berlin</Config>
+</Container>

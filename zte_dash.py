@@ -14,6 +14,7 @@ Einzelabruf:      python3 zte_dash.py --once
 Reconnect testen: python3 zte_dash.py --test-reconnect
 """
 import argparse
+import calendar
 import csv
 import hashlib
 import hmac
@@ -112,6 +113,28 @@ CREATE TABLE IF NOT EXISTS spots (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER NOT NULL, name TEXT NOT NULL, note TEXT, duration INTEGER, n INTEGER,
   net TEXT, band TEXT, pci INTEGER, bw INTEGER, rsrp REAL, rsrq REAL, snr REAL, rssi REAL, rsrp_std REAL, snr_std REAL,
   score REAL, rank_score REAL, level TEXT, limiting TEXT, stability TEXT, series TEXT
+);
+-- SMS: lokales Archiv (Eingang und Gesendet). Gelöschte Einträge bleiben als "deleted" markiert, damit sie
+-- beim nächsten Abgleich mit dem Router nicht wieder auftauchen.
+CREATE TABLE IF NOT EXISTS sms (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  box TEXT NOT NULL,                 -- 'in' | 'out'
+  number TEXT NOT NULL, nkey TEXT NOT NULL,
+  text TEXT NOT NULL,
+  ts INTEGER NOT NULL,               -- Zeitpunkt der Nachricht
+  created INTEGER NOT NULL,          -- Zeitpunkt der Aufnahme ins Archiv
+  read INTEGER NOT NULL DEFAULT 0,
+  status TEXT, detail TEXT,          -- nur 'out': sending | sent | failed | unconfirmed
+  router_id TEXT, source TEXT,
+  deleted INTEGER NOT NULL DEFAULT 0,
+  fp TEXT UNIQUE
+);
+CREATE INDEX IF NOT EXISTS idx_sms_box_ts ON sms(box, ts);
+CREATE INDEX IF NOT EXISTS idx_sms_nkey ON sms(nkey);
+CREATE TABLE IF NOT EXISTS api_tokens (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL, hash TEXT NOT NULL UNIQUE, prefix TEXT NOT NULL,
+  can_read INTEGER NOT NULL DEFAULT 1, can_send INTEGER NOT NULL DEFAULT 0, can_delete INTEGER NOT NULL DEFAULT 0,
+  created INTEGER NOT NULL, last_used INTEGER, uses INTEGER NOT NULL DEFAULT 0
 );
 -- Stundenaggregate: bleiben dauerhaft erhalten
 CREATE TABLE IF NOT EXISTS samples_h (
@@ -214,6 +237,13 @@ DEFAULT_SETTINGS = {
         "max_per_hour": 3,      # Sicherung gegen Endlosschleifen
         "method": "netselect",
     },
+    "sms": {
+        "enabled": True,            # SMS regelmäßig vom Router abholen (braucht das Router-Passwort)
+        "interval_s": 60,           # Abholtakt
+        "send_limit_per_hour": 20,  # Sicherung gegen versehentlich viele (kostenpflichtige) SMS
+        "delete_on_router": False,  # nach der Übernahme im Router löschen (schafft Platz im Router-Speicher)
+        "webhook_url": "",          # optional: bei jeder neuen SMS per HTTP POST melden
+    },
 }
 HOST_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,251}[A-Za-z0-9])?$")
 WD_LIMITS = {"min_failed_targets": (0, 10), "fail_rounds": (0, 1000), "fail_seconds": (0, 86400),
@@ -266,6 +296,17 @@ def sanitize_settings(raw, strict=False):
         raise ValueError("Der Watchdog braucht mindestens ein Ziel mit gesetztem Watchdog-Haken")
     if strict and w["enabled"] and not w["fail_rounds"] and not w["fail_seconds"]:
         raise ValueError("Bitte 'Runden' oder 'Sekunden' größer 0 setzen")
+    rs, sm = raw.get("sms") or {}, d["sms"]
+    sm["enabled"] = bool(rs.get("enabled", sm["enabled"]))
+    sm["delete_on_router"] = bool(rs.get("delete_on_router", sm["delete_on_router"]))
+    sm["interval_s"] = _int(rs.get("interval_s"), 10, 3600, sm["interval_s"])
+    sm["send_limit_per_hour"] = _int(rs.get("send_limit_per_hour"), 1, 500, sm["send_limit_per_hour"])
+    hook = str(rs.get("webhook_url") or "").strip()
+    if hook and not re.match(r"^https?://[^\s]{3,480}$", hook):
+        if strict:
+            raise ValueError("Die Webhook-Adresse muss mit http:// oder https:// beginnen")
+        hook = ""
+    sm["webhook_url"] = hook
     d["general"] = sanitize_general(raw.get("general"), strict)
     return d
 
@@ -340,6 +381,11 @@ def apply_runtime(cfg, settings, secrets, collector=None, monitor=None):
         collector.wake.set()
     if monitor:
         monitor.wake.set()
+    sms = getattr(collector, "sms", None)
+    if sms:
+        if changed:
+            sms._last = 0.0
+        sms.wake.set()
     return changed
 
 
@@ -678,6 +724,53 @@ class Router:
     def set_netselect(self, value):
         return self.call_auth("zte_nwinfo_api", "nwinfo_set_netselect", {"net_select": value})
 
+    def list_methods(self, obj):
+        """ubus 'list': Methoden eines Objekts (nur für die Diagnose)."""
+        resp = self._post([{"jsonrpc": "2.0", "id": 1, "method": "list", "params": [self.sid or ANON_SID, obj]}])
+        item = resp[0] if isinstance(resp, list) and resp else resp
+        return (item or {}).get("result") or []
+
+    # -- SMS (ubus-Objekt zwrt_wms) --------------------------------------------------- #
+    def sms_list(self):
+        d = self.call_auth("zwrt_wms", "zte_libwms_get_sms_data",
+                           {"page": 0, "data_per_page": 500, "mem_store": 1, "tags": 10, "order_by": "order by id desc"})
+        for k in ("messages", "messages_data", "sms_data"):
+            if isinstance(d.get(k), list):
+                return d[k]
+        return []
+
+    def sms_send(self, number, text, plan, ts):
+        lt = datetime.fromtimestamp(ts).astimezone()
+        off = lt.utcoffset().total_seconds() / 3600
+        tz = "0" if off == 0 else (f"+{off:g}" if off > 0 else f"{off:g}")
+        sms_time = ";".join([lt.strftime("%y"), lt.strftime("%m"), lt.strftime("%d"), lt.strftime("%H"), lt.strftime("%M"),
+                             lt.strftime("%S"), tz])
+        return self.call_auth("zwrt_wms", "zte_libwms_send_sms",
+                              {"number": number, "sms_time": sms_time, "message_body": sms_hex(text), "id": "-1",
+                               "encode_type": plan["encoding"]})
+
+    def sms_send_state(self, timeout=12):
+        """Wartet auf den Versandstatus des Routers. True = gesendet, False = fehlgeschlagen, None = unklar."""
+        end = time.time() + timeout
+        while time.time() < end:
+            try:
+                d = self.call_auth("zwrt_wms", "zwrt_wms_get_cmd_status", {"sms_cmd": 4})
+            except RouterError:
+                return None
+            v = str(d.get("sms_cmd_status_result", d.get("result", ""))).strip().lower()
+            if v in ("3", "success"):
+                return True
+            if v in ("2", "fail", "failed", "-1"):
+                return False
+            time.sleep(1.0)
+        return None
+
+    def sms_delete(self, ids):
+        ids = [str(i) for i in ids if str(i).strip()]
+        if ids:
+            return self.call_auth("zwrt_wms", "zwrt_wms_delete_sms", {"id": ";".join(ids) + ";"})
+        return {}
+
 
 def perform_reconnect(router, grace_s=60, progress=None, on_pending=None):
     """Verbindung neu aufbauen: Netzwerkmodus kurz umschalten und zurücksetzen (Modem meldet sich neu
@@ -810,6 +903,155 @@ def counter_delta(cur, prev):
     if cur is None or prev is None:
         return 0
     return int(cur - prev) if cur >= prev else int(cur)
+
+
+# --------------------------------------------------------------------------- #
+# SMS: Kodierung, Router-Schnittstelle (ubus zwrt_wms), Archiv, Abgleich, Versand
+# --------------------------------------------------------------------------- #
+# GSM-7-Zeichensatz (Standard + Erweiterungstabelle, die je 2 Zeichen belegt)
+GSM7_BASIC = ("@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\x1bÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?"
+              "¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà")
+GSM7_EXT = "^{}\\[~]|€"
+SMS_MAX_SEGMENTS = 6
+NUM_CLEAN_RE = re.compile(r"[\s\-\(\)/.]")
+NUM_RE = re.compile(r"^\+?[0-9]{3,20}$")
+NONDIGIT_RE = re.compile(r"\D")
+
+
+class SmsError(Exception):
+    """Fehler mit passendem HTTP-Status (400 Eingabe, 403 Recht, 404 unbekannt, 429 Limit, 502 Router)."""
+
+    def __init__(self, msg, code=400):
+        super().__init__(msg)
+        self.code = code
+
+
+def sms_plan(text):
+    """Kodierung und Anzahl der SMS-Teile: GSM-7 (160/153 Zeichen) oder Unicode (70/67 Zeichen)."""
+    gsm = all(c in GSM7_BASIC or c in GSM7_EXT for c in text)
+    if gsm:
+        n = sum(2 if c in GSM7_EXT else 1 for c in text)
+        seg = 1 if n <= 160 else -(-n // 153)
+        return {"encoding": "GSM7_default", "length": len(text), "units": n, "segments": seg if n else 0}
+    n = len(text.encode("utf-16-le")) // 2
+    seg = 1 if n <= 70 else -(-n // 67)
+    return {"encoding": "UNICODE", "length": len(text), "units": n, "segments": seg}
+
+
+def sms_hex(text):
+    return text.encode("utf-16-be", "surrogatepass").hex().upper()
+
+
+def sms_unhex(content):
+    """Router liefert den Text als UTF-16BE-Hex; reiner Klartext wird unverändert übernommen."""
+    c = str(content or "")
+    if c and len(c) % 4 == 0 and re.fullmatch(r"[0-9A-Fa-f]+", c):
+        try:
+            return bytes.fromhex(c).decode("utf-16-be", "replace")
+        except ValueError:
+            pass
+    return c
+
+
+def sms_number(raw, strict=True):
+    n = NUM_CLEAN_RE.sub("", str(raw or ""))
+    if n.startswith("00"):
+        n = "+" + n[2:]
+    if not NUM_RE.match(n):
+        if strict:
+            raise SmsError("Ungültige Rufnummer – erlaubt sind Ziffern mit optionalem + (z. B. +491701234567)")
+        return str(raw or "").strip()
+    return n
+
+
+def sms_nkey(number):
+    return NONDIGIT_RE.sub("", str(number or ""))[-9:]
+
+
+def sms_fp(box, number, ts, text):
+    return hashlib.sha1(f"{box}|{NONDIGIT_RE.sub('', str(number))}|{int(ts)}|{text}".encode()).hexdigest()
+
+
+def parse_sms_date(raw, default):
+    """'24,05,12,14,30,00,+2' (auch mit ;) -> Unix-Zeit. Die Zeitzone gilt in Stunden (Viertelstunden werden erkannt)."""
+    try:
+        p = [x.strip() for x in re.split(r"[,;]", str(raw)) if x.strip() != ""]
+        y, mo, d, h, mi, se = (int(p[i]) for i in range(6))
+        dt = datetime(y + 2000 if y < 100 else y, mo, d, h, mi, se)
+        if len(p) > 6:
+            tz = float(p[6])
+            if abs(tz) > 14:
+                tz /= 4
+            return int(calendar.timegm(dt.timetuple()) - tz * 3600)
+        return int(dt.timestamp())
+    except (ValueError, IndexError, OverflowError, OSError):
+        return default
+
+
+def sms_iso(ts):
+    return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
+
+
+def sms_json(r):
+    d = {"id": r["id"], "box": "inbox" if r["box"] == "in" else "sent", "number": r["number"], "text": r["text"],
+         "timestamp": r["ts"], "time": sms_iso(r["ts"]), "read": bool(r["read"])}
+    if r["box"] == "out":
+        d["status"] = r["status"]
+        if r["detail"]:
+            d["detail"] = r["detail"]
+    return d
+
+
+def sms_accepted(res):
+    """Antwort auf einen Schreibaufruf: True = angenommen, False = abgelehnt, None = unklar."""
+    v = (res or {}).get("result")
+    if isinstance(v, str):
+        v = v.strip().lower()
+        if v == "success":
+            return True
+        try:
+            v = float(v)
+        except ValueError:
+            return None
+    if isinstance(v, (int, float)):
+        return True if v in (0, 3) else False if v in (2, -1) else None
+    return None
+
+
+def sms_query(conn, box="inbox", unread=False, number=None, since_id=None, since_ts=None, before_id=None,
+              limit=50, order=None, q=None):
+    where, args = ["deleted=0"], []
+    if box in ("inbox", "in"):
+        where.append("box='in'")
+    elif box in ("sent", "out"):
+        where.append("box='out'")
+    elif box != "all":
+        raise SmsError("box muss inbox, sent oder all sein")
+    if unread:
+        where.append("box='in' AND read=0")
+    if number:
+        key = sms_nkey(number)
+        if not key:
+            raise SmsError("Ungültige Rufnummer im Filter")
+        where.append("nkey=?")
+        args.append(key)
+    if since_id is not None:
+        where.append("id>?")
+        args.append(since_id)
+    if since_ts is not None:
+        where.append("ts>=?")
+        args.append(since_ts)
+    if before_id is not None:
+        where.append("id<?")
+        args.append(before_id)
+    if q:
+        where.append("(text LIKE ? OR number LIKE ?)")
+        args += [f"%{q}%", f"%{q}%"]
+    order = order or ("asc" if since_id is not None else "desc")
+    limit = max(1, min(500, int(limit)))
+    rows = conn.execute(f"SELECT * FROM sms WHERE {' AND '.join(where)} ORDER BY ts {'ASC' if order == 'asc' else 'DESC'}, "
+                        f"id {'ASC' if order == 'asc' else 'DESC'} LIMIT ?", (*args, limit)).fetchall()
+    return rows
 
 
 # --------------------------------------------------------------------------- #
@@ -1217,6 +1459,233 @@ class Monitor(threading.Thread):
                 self.st["grace_until"] = max(self.st["grace_until"], time.time() + 10)
 
 
+class SmsService(threading.Thread):
+    """Holt SMS regelmäßig vom Router ins lokale Archiv, versendet SMS und meldet neue Nachrichten (Long-Poll, Webhook)."""
+
+    def __init__(self, cfg, collector):
+        super().__init__(daemon=True)
+        self.cfg, self.router = cfg, collector.router
+        self.stop_flag = threading.Event()
+        self.wake = threading.Event()
+        self.cond = threading.Condition()
+        self.send_lock = threading.Lock()
+        self.sync_lock = threading.Lock()
+        self.lock = threading.Lock()
+        self.status = {"ok": None, "last_sync": None, "last_error": None, "last_import": 0}
+        self._last = 0.0
+        self._force = False
+        try:
+            conn = connect(cfg.db)
+            self.last_in_id = conn.execute("SELECT COALESCE(MAX(id),0) FROM sms WHERE box='in'").fetchone()[0]
+            conn.close()
+        except sqlite3.Error:
+            self.last_in_id = 0
+
+    # -- Steuerung ---------------------------------------------------------------- #
+    def snapshot(self):
+        with self.lock:
+            return dict(self.status)
+
+    def _set(self, **kw):
+        with self.lock:
+            self.status.update(kw)
+
+    def sync_now(self):
+        self._force = True
+        self.wake.set()
+
+    def run(self):
+        while not self.stop_flag.is_set():
+            wait = 5.0
+            try:
+                wait = self.tick()
+            except Exception:  # noqa: BLE001
+                log.exception("Unerwarteter Fehler im SMS-Dienst")
+            self.wake.wait(max(1.0, wait))
+            self.wake.clear()
+
+    def tick(self):
+        conn = connect(self.cfg.db)
+        try:
+            st = load_settings(conn)["sms"]
+        finally:
+            conn.close()
+        if not st["enabled"] or not self.router.can_login:
+            self._set(ok=None, last_error=None if not st["enabled"] else "Router-Passwort fehlt")
+            return 10.0
+        due = self._last + st["interval_s"] - time.time()
+        if due > 0 and not self._force:
+            return min(due, 15.0)
+        self._force = False
+        self._last = time.time()
+        try:
+            self.sync()
+        except RouterError as exc:
+            msg = str(exc)
+            if self.status.get("last_error") != msg:
+                log.warning("SMS-Abruf nicht möglich: %s", msg)
+            self._set(ok=False, last_error=msg)
+        return min(st["interval_s"], 15.0)
+
+    # -- Abgleich Router -> Archiv --------------------------------------------------- #
+    def sync(self):
+        with self.sync_lock:
+            msgs = self.router.sms_list()
+            conn = connect(self.cfg.db)
+            new_in, kept_ids, imported = [], [], 0
+            try:
+                st = load_settings(conn)["sms"]
+                first = conn.execute("SELECT COUNT(*) FROM sms").fetchone()[0] == 0
+                now = int(time.time())
+                for m in msgs:
+                    try:
+                        tag = int(str(m.get("tag")).strip())
+                    except ValueError:
+                        continue
+                    if tag not in (0, 1, 2, 3):        # Entwürfe u. a. ignorieren
+                        continue
+                    box = "in" if tag < 2 else "out"
+                    number, text = str(m.get("number") or "").strip(), sms_unhex(m.get("content"))
+                    ts = parse_sms_date(m.get("date"), now)
+                    rid = str(m.get("id") or "")
+                    fp = sms_fp(box, number, ts, text)
+                    row = conn.execute("SELECT id, status FROM sms WHERE fp=?", (fp,)).fetchone()
+                    if not row and box == "out":       # eigene, über das Dashboard gesendete Nachricht wiedererkennen
+                        row = conn.execute("SELECT id, status FROM sms WHERE box='out' AND nkey=? AND text=? AND ABS(ts-?)<=180 "
+                                           "AND router_id IS NULL ORDER BY ABS(ts-?) LIMIT 1", (sms_nkey(number), text, ts, ts)).fetchone()
+                    if row:
+                        conn.execute("UPDATE sms SET router_id=?, fp=? WHERE id=?", (rid, fp, row["id"]))   # ab jetzt exakt wiedererkennbar
+                        if box == "out" and row["status"] in ("sending", "unconfirmed"):
+                            conn.execute("UPDATE sms SET status=? WHERE id=?", ("failed" if tag == 3 else "sent", row["id"]))
+                        kept_ids.append(rid)
+                        continue
+                    cur = conn.execute(
+                        "INSERT INTO sms(box,number,nkey,text,ts,created,read,status,router_id,source,fp) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                        (box, number, sms_nkey(number), text, ts, now, 0 if tag == 1 else 1,
+                         None if box == "in" else ("failed" if tag == 3 else "sent"), rid, "router", fp))
+                    imported += 1
+                    kept_ids.append(rid)
+                    if box == "in":
+                        new_in.append(conn.execute("SELECT * FROM sms WHERE id=?", (cur.lastrowid,)).fetchone())
+                if imported and first:
+                    add_event(conn, now, "sms_in", f"{imported} vorhandene SMS aus dem Router übernommen")
+                elif new_in:
+                    for r in new_in:
+                        add_event(conn, now, "sms_in", f"SMS von {r['number']}")
+                conn.commit()
+            finally:
+                conn.close()
+            self._set(ok=True, last_sync=int(time.time()), last_error=None, last_import=imported)
+            if new_in:
+                with self.cond:
+                    self.last_in_id = max(self.last_in_id, max(r["id"] for r in new_in))
+                    self.cond.notify_all()
+                if st["webhook_url"] and not first:
+                    threading.Thread(target=self._webhook, args=(st["webhook_url"], [dict(r) for r in new_in]), daemon=True).start()
+            if st["delete_on_router"] and kept_ids:
+                try:
+                    for i in range(0, len(kept_ids), 20):
+                        self.router.sms_delete(kept_ids[i:i + 20])
+                except RouterError as exc:
+                    log.warning("SMS im Router löschen fehlgeschlagen: %s", exc)
+            return imported
+
+    @staticmethod
+    def _webhook(url, rows):
+        for r in rows:
+            body = json.dumps({"event": "sms_received", "message": sms_json(r)}).encode()
+            req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json", "User-Agent": "zte-dash"})
+            try:
+                urllib.request.urlopen(req, timeout=6).read(200)
+            except (urllib.error.URLError, OSError, ValueError) as exc:
+                log.warning("Webhook nicht erreichbar (%s): %s", url, exc)
+
+    def wait_new(self, since_id, timeout):
+        """Long-Poll: wartet bis eine SMS mit größerer ID im Eingang liegt (max. timeout Sekunden)."""
+        end = time.time() + max(0, min(60, timeout))
+        with self.cond:
+            while self.last_in_id <= since_id and time.time() < end and not self.stop_flag.is_set():
+                self.cond.wait(min(1.0, end - time.time()))
+            return self.last_in_id > since_id
+
+    # -- Versand --------------------------------------------------------------------- #
+    def send(self, number, text, source="dashboard"):
+        number = sms_number(number)
+        text = str(text or "").replace("\r\n", "\n")
+        if not text.strip():
+            raise SmsError("Der Text darf nicht leer sein")
+        plan = sms_plan(text)
+        if plan["segments"] > SMS_MAX_SEGMENTS:
+            raise SmsError(f"Der Text ist zu lang ({plan['segments']} SMS-Teile, erlaubt sind {SMS_MAX_SEGMENTS}). "
+                           f"Mit Sonderzeichen passen nur 67 Zeichen je Teil.")
+        if not self.router.can_login:
+            raise SmsError("Zum Senden wird das Router-Passwort benötigt (Einstellungen → Verbindung)", 409)
+        conn = connect(self.cfg.db)
+        try:
+            st = load_settings(conn)["sms"]
+            now = int(time.time())
+            used = conn.execute("SELECT COUNT(*) FROM sms WHERE box='out' AND source!='router' AND created>?", (now - 3600,)).fetchone()[0]
+            if used >= st["send_limit_per_hour"]:
+                raise SmsError(f"Sendelimit erreicht: höchstens {st['send_limit_per_hour']} SMS pro Stunde "
+                               f"(einstellbar unter Einstellungen → SMS)", 429)
+            with self.send_lock:
+                ts = int(time.time())
+                cur = conn.execute("INSERT INTO sms(box,number,nkey,text,ts,created,read,status,source,fp) VALUES('out',?,?,?,?,?,1,'sending',?,?)",
+                                   (number, sms_nkey(number), text, ts, ts, source, sms_fp("out", number, ts, text) + f"-{secrets.token_hex(3)}"))
+                rid = cur.lastrowid
+                conn.commit()
+                status, detail = "sent", None
+                try:
+                    res = self.router.sms_send(number, text, plan, ts)
+                    ok = sms_accepted(res)
+                    if ok is False:
+                        status, detail = "failed", "Der Router hat die SMS abgelehnt"
+                    else:
+                        state = self.router.sms_send_state()
+                        if state is False:
+                            status, detail = "failed", "Der Versand ist fehlgeschlagen (Router-Status)"
+                        elif state is None or ok is None:
+                            status, detail = "unconfirmed", "Vom Router angenommen, Zustellung nicht bestätigt"
+                except RouterError as exc:
+                    status, detail = "failed", str(exc)
+                conn.execute("UPDATE sms SET status=?, detail=? WHERE id=?", (status, detail, rid))
+                add_event(conn, int(time.time()), "sms_out" if status != "failed" else "sms_fail",
+                          f"SMS an {number}" + ("" if status != "failed" else f" fehlgeschlagen: {detail}"))
+                conn.commit()
+                row = conn.execute("SELECT * FROM sms WHERE id=?", (rid,)).fetchone()
+        finally:
+            conn.close()
+        self._force = True
+        self.wake.set()
+        out = sms_json(row)
+        out["segments"], out["encoding"] = plan["segments"], plan["encoding"]
+        if row["status"] == "failed":
+            raise SmsError(detail or "SMS konnte nicht gesendet werden", 502)
+        return out
+
+    # -- Löschen ---------------------------------------------------------------------- #
+    def delete(self, ids, on_router=True):
+        conn = connect(self.cfg.db)
+        try:
+            ids = [int(i) for i in ids][:500]
+            rows = [r for r in conn.execute(f"SELECT * FROM sms WHERE deleted=0 AND id IN ({','.join('?' * len(ids)) or 'NULL'})", ids)]
+            conn.executemany("UPDATE sms SET deleted=1 WHERE id=?", [(r["id"],) for r in rows])
+            conn.commit()
+        finally:
+            conn.close()
+        removed_router = 0
+        if on_router and rows and self.router.can_login:
+            try:
+                have = {str(m.get("id")): (str(m.get("number") or "").strip(), sms_unhex(m.get("content"))) for m in self.router.sms_list()}
+                rids = [r["router_id"] for r in rows if r["router_id"] and have.get(r["router_id"]) == (r["number"], r["text"])]
+                for i in range(0, len(rids), 20):
+                    self.router.sms_delete(rids[i:i + 20])
+                removed_router = len(rids)
+            except RouterError as exc:
+                log.warning("SMS im Router löschen fehlgeschlagen: %s", exc)
+        return {"deleted": len(rows), "deleted_on_router": removed_router}
+
+
 def fmt_bytes(b):
     if b is None:
         return "–"
@@ -1316,8 +1785,8 @@ class LiveFeed:
 
 
 class Api:
-    def __init__(self, cfg, collector, monitor=None, auth=None):
-        self.cfg, self.collector, self.monitor, self.auth = cfg, collector, monitor, auth
+    def __init__(self, cfg, collector, monitor=None, auth=None, sms=None):
+        self.cfg, self.collector, self.monitor, self.auth, self.sms = cfg, collector, monitor, auth, sms
         self.live_feed = LiveFeed(collector.router) if collector else None
         self._last_test = 0.0
 
@@ -1350,6 +1819,7 @@ class Api:
                                 "last_ping": [{"target": r["target"], "rtt": r["rtt"]} for r in last_ping],
                                 "last_ping_ts": last_ping[0]["ts"] if last_ping else None},
                     "auth": {"enabled": bool(self.auth and self.auth.enabled)},
+                    "sms": {"unread": self.sms_counts(conn)[0], "enabled": settings["sms"]["enabled"]},
                     "config": {"poll": self.cfg.poll, "usage": self.cfg.usage_every, "limit_gb": self.cfg.limit_gb,
                                "billing_day": self.cfg.billing_day, "raw_days": self.cfg.raw_days, "host": self.cfg.host,
                                "ui_refresh": self.cfg.ui_refresh},
@@ -1502,6 +1972,264 @@ class Api:
         finally:
             conn.close()
 
+    # -- Verbrauch in wählbarer Auflösung ------------------------------------------------- #
+    BUCKETS = ("10m", "1h", "1d", "1w", "1M")
+    BUCKET_DEFAULT = {"10m": 144, "1h": 168, "1d": 30, "1w": 26, "1M": 12}
+    BUCKET_STEP = {"10m": 600, "1h": 3600, "1d": 86400, "1w": 7 * 86400, "1M": 30.44 * 86400}
+
+    @staticmethod
+    def _bucket_start(bucket, ts):
+        """Beginn des Abschnitts, in den ts fällt (Tage/Wochen/Monate nach Ortszeit, Woche beginnt am Montag)."""
+        if bucket == "10m":
+            return int(ts) // 600 * 600
+        if bucket == "1h":
+            return int(ts) // 3600 * 3600
+        d = datetime.fromtimestamp(ts).replace(hour=0, minute=0, second=0, microsecond=0)
+        if bucket == "1w":
+            d -= timedelta(days=d.weekday())
+        elif bucket == "1M":
+            d = d.replace(day=1)
+        return int(d.timestamp())
+
+    @staticmethod
+    def _bucket_next(bucket, ts, k=1):
+        """Beginn des k-ten folgenden (k<0: vorherigen) Abschnitts."""
+        if bucket == "10m":
+            return int(ts) + 600 * k
+        if bucket == "1h":
+            return int(ts) + 3600 * k
+        d = datetime.fromtimestamp(ts)
+        if bucket == "1d":
+            d += timedelta(days=k)
+        elif bucket == "1w":
+            d += timedelta(days=7 * k)
+        else:
+            m = d.year * 12 + d.month - 1 + k
+            d = d.replace(year=m // 12, month=m % 12 + 1, day=1)
+        return int(d.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+    def usage_series(self, bucket="1d", count=None, t_from=None, t_to=None):
+        """Datenverbrauch (Download/Upload) je Abschnitt. Entweder die letzten `count` Abschnitte oder ein Zeitfenster
+        (Zoom); dort wird die Auflösung bei Bedarf automatisch vergröbert bzw. verfeinert."""
+        if bucket not in self.BUCKETS:
+            raise ValueError("bucket muss 10m, 1h, 1d, 1w oder 1M sein")
+        now = int(time.time())
+        requested, adjusted = bucket, False
+        if t_from is not None and t_to is not None:
+            until, since = min(int(t_to), now), max(int(t_from), now - 800 * 86400)
+            if until - since < 30:
+                since = until - 30
+            span, i = until - since, self.BUCKETS.index(bucket)
+            while i < len(self.BUCKETS) - 1 and span / self.BUCKET_STEP[self.BUCKETS[i]] > 600:
+                i += 1
+            while i > 0 and span / self.BUCKET_STEP[self.BUCKETS[i]] < 6:
+                i -= 1
+            bucket = self.BUCKETS[i]
+            adjusted = bucket != requested
+            first = self._bucket_start(bucket, since)
+            starts, t = [], first
+            while t <= until and len(starts) < 700:
+                starts.append(t)
+                t = self._bucket_next(bucket, t)
+        else:
+            n = max(1, min(800, int(count or self.BUCKET_DEFAULT[bucket])))
+            cur = self._bucket_start(bucket, now)
+            first = self._bucket_next(bucket, cur, -(n - 1))
+            starts = [first]
+            for _ in range(n - 1):
+                starts.append(self._bucket_next(bucket, starts[-1]))
+        end_all = self._bucket_next(bucket, starts[-1])
+        conn = self.conn()
+        try:
+            sums = {}
+            if bucket == "10m":
+                for r in conn.execute("SELECT (ts/600)*600 b, SUM(rx_delta) rx, SUM(tx_delta) tx FROM traffic WHERE ts>=? AND ts<? GROUP BY b",
+                                      (starts[0], end_all)):
+                    sums[r["b"]] = (r["rx"] or 0, r["tx"] or 0)
+                cov = conn.execute("SELECT MIN(ts) FROM traffic").fetchone()[0]
+            elif bucket == "1h":
+                for r in conn.execute("SELECT ts b, rx_delta rx, tx_delta tx FROM traffic_h WHERE ts>=? AND ts<?", (starts[0], end_all)):
+                    sums[r["b"]] = (r["rx"] or 0, r["tx"] or 0)
+                for r in conn.execute("SELECT (ts/3600)*3600 b, SUM(rx_delta) rx, SUM(tx_delta) tx FROM traffic WHERE ts>=? AND ts<? GROUP BY b",
+                                      (starts[0], end_all)):
+                    sums[r["b"]] = (r["rx"] or 0, r["tx"] or 0)       # Rohwerte sind genauer, solange vorhanden
+                cov = conn.execute("SELECT MIN(ts) FROM traffic_h").fetchone()[0]
+            else:
+                d0 = datetime.fromtimestamp(starts[0]).strftime("%Y-%m-%d")
+                by_day = {r["day"]: (r["rx"], r["tx"]) for r in conn.execute("SELECT day, rx, tx FROM daily WHERE day>=?", (d0,))}
+                idx = {}
+                for day, (rx, tx) in by_day.items():
+                    b = self._bucket_start(bucket, datetime.strptime(day, "%Y-%m-%d").timestamp() + 43200)
+                    a = idx.get(b, (0, 0))
+                    idx[b] = (a[0] + rx, a[1] + tx)
+                sums = idx
+                m = conn.execute("SELECT MIN(day) FROM daily").fetchone()[0]
+                cov = int(datetime.strptime(m, "%Y-%m-%d").timestamp()) if m else None
+        finally:
+            conn.close()
+        pts, tot_rx, tot_tx = [], 0, 0
+        for i, t in enumerate(starts):
+            te = starts[i + 1] if i + 1 < len(starts) else end_all
+            rx, tx = sums.get(t, (0, 0))
+            tot_rx += rx
+            tot_tx += tx
+            pts.append({"t": t, "t_end": te, "rx": int(rx), "tx": int(tx), "partial": te > now})
+        return {"bucket": bucket, "requested": requested, "adjusted": adjusted, "points": pts, "since": starts[0],
+                "until": min(end_all, now), "now": now, "rx": int(tot_rx), "tx": int(tot_tx), "coverage_from": cov}
+
+    # -- SMS ---------------------------------------------------------------------------- #
+    def sms_counts(self, conn):
+        r = conn.execute("SELECT SUM(box='in' AND read=0) u, SUM(box='in') i, SUM(box='out') o FROM sms WHERE deleted=0").fetchone()
+        return int(r["u"] or 0), int(r["i"] or 0), int(r["o"] or 0)
+
+    def sms_status(self):
+        conn = self.conn()
+        try:
+            unread, n_in, n_out = self.sms_counts(conn)
+            st = load_settings(conn)["sms"]
+            used = conn.execute("SELECT COUNT(*) FROM sms WHERE box='out' AND source!='router' AND created>?", (int(time.time()) - 3600,)).fetchone()[0]
+            last_id = conn.execute("SELECT COALESCE(MAX(id),0) FROM sms WHERE box='in' AND deleted=0").fetchone()[0]
+        finally:
+            conn.close()
+        s = self.sms.snapshot() if self.sms else {}
+        return {"enabled": st["enabled"], "router_ok": s.get("ok"), "last_sync": s.get("last_sync"), "last_error": s.get("last_error"),
+                "can_send": bool(self.collector.router.can_login and st["enabled"]), "unread": unread, "inbox": n_in, "sent": n_out,
+                "sent_last_hour": used, "send_limit_per_hour": st["send_limit_per_hour"], "last_inbox_id": last_id,
+                "interval_s": st["interval_s"]}
+
+    def sms_list(self, box="inbox", unread=False, number=None, since_id=None, since_ts=None, before_id=None, limit=50,
+                 order=None, q=None, mark_read=False, wait=0):
+        if wait and since_id is not None and self.sms:
+            self.sms.wait_new(since_id, wait)
+        conn = self.conn()
+        try:
+            rows = sms_query(conn, box, unread, number, since_id, since_ts, before_id, limit, order, q)
+            if mark_read:
+                ids = [r["id"] for r in rows if r["box"] == "in" and not r["read"]]
+                if ids:
+                    conn.execute(f"UPDATE sms SET read=1 WHERE id IN ({','.join('?' * len(ids))})", ids)
+                    conn.commit()
+            unread_n, n_in, n_out = self.sms_counts(conn)
+            out = []
+            for r in rows:
+                j = sms_json(r)
+                if mark_read and r["box"] == "in":
+                    j["read"] = True
+                j["plan"] = sms_plan(r["text"])["segments"]
+                out.append(j)
+            return {"count": len(out), "messages": out, "unread": unread_n,
+                    "total_inbox": n_in, "total_sent": n_out, "last_id": max([r["id"] for r in rows], default=None)}
+        finally:
+            conn.close()
+
+    def sms_get(self, sid):
+        conn = self.conn()
+        try:
+            r = conn.execute("SELECT * FROM sms WHERE id=? AND deleted=0", (int(sid),)).fetchone()
+        finally:
+            conn.close()
+        if not r:
+            raise SmsError("SMS nicht gefunden", 404)
+        return sms_json(r)
+
+    def sms_send(self, number, text, source="dashboard"):
+        if not self.sms:
+            raise SmsError("SMS-Dienst nicht aktiv", 503)
+        return self.sms.send(number, text, source)
+
+    def sms_preview(self, text):
+        return sms_plan(str(text or ""))
+
+    def sms_mark_read(self, ids=None, all_=False, unread=True):
+        conn = self.conn()
+        try:
+            if all_:
+                cur = conn.execute("UPDATE sms SET read=? WHERE box='in' AND deleted=0", (0 if not unread else 1,))
+            else:
+                ids = [int(i) for i in (ids or [])][:500]
+                cur = conn.execute(f"UPDATE sms SET read=? WHERE box='in' AND deleted=0 AND id IN ({','.join('?' * len(ids)) or 'NULL'})",
+                                   (1 if unread else 0, *ids))
+            conn.commit()
+            return {"updated": cur.rowcount}
+        finally:
+            conn.close()
+
+    def sms_delete(self, ids):
+        if not self.sms:
+            raise SmsError("SMS-Dienst nicht aktiv", 503)
+        return self.sms.delete(ids)
+
+    def sms_sync(self):
+        if not self.sms:
+            raise SmsError("SMS-Dienst nicht aktiv", 503)
+        if not self.collector.router.can_login:
+            raise SmsError("Router-Passwort fehlt (Einstellungen → Verbindung)", 409)
+        try:
+            n = self.sms.sync()
+        except RouterError as exc:
+            self.sms._set(ok=False, last_error=str(exc))
+            raise SmsError(f"Router: {exc}", 502)
+        return {"imported": n, **self.sms_status()}
+
+    # -- API-Tokens (für Skripte und andere Programme) -------------------------------------- #
+    @staticmethod
+    def _token_hash(token):
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def tokens_list(self):
+        conn = self.conn()
+        try:
+            rows = conn.execute("SELECT * FROM api_tokens ORDER BY id").fetchall()
+        finally:
+            conn.close()
+        return {"tokens": [{"id": r["id"], "name": r["name"], "prefix": r["prefix"], "can_read": bool(r["can_read"]),
+                            "can_send": bool(r["can_send"]), "can_delete": bool(r["can_delete"]), "created": r["created"],
+                            "last_used": r["last_used"], "uses": r["uses"]} for r in rows]}
+
+    def token_create(self, body):
+        name = str(body.get("name") or "").strip()[:40]
+        if not name:
+            raise ValueError("Bitte einen Namen für den Token angeben (z. B. Home Assistant)")
+        perms = body.get("perms") if isinstance(body.get("perms"), list) else ["read"]
+        can = {k: 1 if k in perms else 0 for k in ("read", "send", "delete")}
+        if not any(can.values()):
+            raise ValueError("Mindestens ein Recht auswählen")
+        conn = self.conn()
+        try:
+            if conn.execute("SELECT COUNT(*) FROM api_tokens").fetchone()[0] >= 20:
+                raise ValueError("Höchstens 20 Tokens")
+            token = "zte_" + secrets.token_urlsafe(30)
+            conn.execute("INSERT INTO api_tokens(name,hash,prefix,can_read,can_send,can_delete,created) VALUES(?,?,?,?,?,?,?)",
+                         (name, self._token_hash(token), token[:9], can["read"], can["send"], can["delete"], int(time.time())))
+            conn.commit()
+        finally:
+            conn.close()
+        return {"token": token, **self.tokens_list()}
+
+    def token_delete(self, body):
+        conn = self.conn()
+        try:
+            conn.execute("DELETE FROM api_tokens WHERE id=?", (int(body.get("id") or 0),))
+            conn.commit()
+        finally:
+            conn.close()
+        return self.tokens_list()
+
+    def token_verify(self, token):
+        """Gültiger Token -> Zeile (mit Rechten), sonst None. Nutzung wird mitgezählt."""
+        if not token or len(token) > 200:
+            return None
+        conn = self.conn()
+        try:
+            r = conn.execute("SELECT * FROM api_tokens WHERE hash=?", (self._token_hash(token),)).fetchone()
+            if r:
+                now = int(time.time())
+                conn.execute("UPDATE api_tokens SET uses=uses+1, last_used=? WHERE id=?", (now, r["id"]))
+                conn.commit()
+            return dict(r) if r else None
+        finally:
+            conn.close()
+
     # -- Tagesverbrauch + Prognose ---------------------------------------------------- #
     def daily(self, days, end=None):
         days = max(1, min(800, days))
@@ -1597,6 +2325,12 @@ class Api:
                 "capabilities": {"icmp": ICMP_STATE["ok"], "reconnect": r.can_login, "platform": sys.platform}}
 
     def save_settings(self, body):
+        if "sms" not in body:                        # ältere Oberfläche: SMS-Einstellungen unverändert lassen
+            conn0 = self.conn()
+            try:
+                body = {**body, "sms": load_settings(conn0)["sms"]}
+            finally:
+                conn0.close()
         clean = sanitize_settings(body, strict=True)
         pw = body.get("router_password")
         conn = self.conn()
@@ -1938,12 +2672,96 @@ class Handler(BaseHTTPRequestHandler):
         except (KeyError, ValueError, IndexError):
             return None
 
+    # -- SMS-API mit Token (/api/v1/...) -------------------------------------------------- #
+    def _bearer(self):
+        h = self.headers.get("Authorization") or ""
+        return h[7:].strip() if h.lower().startswith("bearer ") else (self.headers.get("X-API-Key") or "").strip()
+
+    @staticmethod
+    def _truthy(v):
+        return str(v).strip().lower() in ("1", "true", "yes", "on", "ja")
+
+    def _sms_args(self, q):
+        one = lambda k, d=None: (q.get(k) or [d])[0]
+        order = one("order")
+        return dict(box=one("box", "inbox"), unread=self._truthy(one("unread", "0")), number=one("number") or None,
+                    since_id=self._opt_int(q, "since_id"), since_ts=self._opt_int(q, "since"), before_id=self._opt_int(q, "before_id"),
+                    limit=self._opt_int(q, "limit") or 50, order=order if order in ("asc", "desc") else None, q=one("q") or None,
+                    mark_read=self._truthy(one("mark_read", "0")), wait=self._opt_int(q, "wait") or 0)
+
+    def _read_body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if length > 1_000_000:
+            raise ValueError("zu groß")
+        raw = self.rfile.read(length) if length else b""
+        if "application/x-www-form-urlencoded" in (self.headers.get("Content-Type") or ""):
+            return {k: v[0] for k, v in parse_qs(raw.decode("utf-8", "replace")).items()}
+        body = json.loads(raw or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("Ungültige Anfrage: JSON-Objekt erwartet")
+        return body
+
+    def _v1(self, method, url, q):
+        """Token-geschützte SMS-Schnittstelle für Skripte und andere Programme."""
+        key = "api|" + self._ip()
+        wait = self.auth.wait_time(key)
+        if wait:
+            return self._json(429, {"error": f"Zu viele ungültige Tokens - bitte {wait} s warten", "retry_after": wait})
+        tok = self.api.token_verify(self._bearer())
+        self.auth.record(key, tok is not None)
+        if not tok:
+            time.sleep(0.3)
+            return self._json(401, {"error": "Ungültiger oder fehlender API-Token. Header: Authorization: Bearer <token>"})
+        def need(perm):
+            if not tok["can_" + perm]:
+                raise SmsError(f"Dem Token fehlt das Recht '{perm}'", 403)
+        parts = [x for x in url.path[len("/api/v1"):].split("/") if x]
+        who = f"api:{tok['name']}"
+        body = self._read_body() if method in ("POST", "PUT") else {}
+        if parts == ["status"] and method == "GET":
+            return self._json(200, self.api.sms_status())
+        if parts[:1] == ["sms"]:
+            if len(parts) == 1 and method == "GET":
+                need("read")
+                if self._truthy((q.get("refresh") or ["0"])[0]):
+                    try:
+                        self.api.sms_sync()
+                    except SmsError:
+                        pass                       # dann eben mit dem Stand vom letzten Abruf antworten
+                return self._json(200, self.api.sms_list(**self._sms_args(q)))
+            if (parts == ["sms"] or parts == ["sms", "send"]) and method == "POST":
+                need("send")
+                res = self.api.sms_send(body.get("to") or body.get("number"), body.get("text") or body.get("message"), who)
+                return self._json(200, {"ok": True, "message": res})
+            if parts == ["sms", "read"] and method == "POST":
+                need("read")
+                return self._json(200, self.api.sms_mark_read(body.get("ids"), self._truthy(body.get("all", False))))
+            if parts == ["sms", "delete"] and method == "POST":
+                need("delete")
+                return self._json(200, self.api.sms_delete(body.get("ids") or []))
+            if len(parts) >= 2 and parts[1].isdigit():
+                sid = int(parts[1])
+                if len(parts) == 2 and method == "GET":
+                    need("read")
+                    return self._json(200, self.api.sms_get(sid))
+                if len(parts) == 2 and method == "DELETE" or (len(parts) == 3 and parts[2] == "delete" and method == "POST"):
+                    need("delete")
+                    self.api.sms_get(sid)
+                    return self._json(200, self.api.sms_delete([sid]))
+                if len(parts) == 3 and parts[2] == "read" and method == "POST":
+                    need("read")
+                    self.api.sms_get(sid)
+                    return self._json(200, self.api.sms_mark_read([sid]))
+        return self._json(404, {"error": "Unbekannter Endpunkt. Beschreibung: Dashboard → SMS → API"})
+
     def do_GET(self):  # noqa: N802
         url = urlparse(self.path)
         q = parse_qs(url.query)
         rng = q.get("range", ["24h"])[0]
         t_from, t_to = self._opt_int(q, "from"), self._opt_int(q, "to")
         try:
+            if url.path == "/api/v1" or url.path.startswith("/api/v1/"):
+                return self._v1("GET", url, q)
             if not self._gate(url.path):
                 return
             if url.path == "/login":
@@ -1968,6 +2786,15 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.api.live(self._opt_int(q, "since") or 0))
             if url.path == "/api/spots":
                 return self._json(200, self.api.spots())
+            if url.path == "/api/usage_series":
+                bucket = q.get("bucket", ["1d"])[0]
+                return self._json(200, self.api.usage_series(bucket, self._opt_int(q, "count"), t_from, t_to))
+            if url.path == "/api/sms":
+                return self._json(200, {**self.api.sms_list(**{**self._sms_args(q), "wait": 0}), "status": self.api.sms_status()})
+            if url.path == "/api/sms/status":
+                return self._json(200, self.api.sms_status())
+            if url.path == "/api/sms/tokens":
+                return self._json(200, self.api.tokens_list())
             if url.path == "/api/settings":
                 return self._json(200, self.api.get_settings())
             if url.path == "/api/export.csv":
@@ -1977,6 +2804,8 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/healthz":
                 return self._send(200, "ok", "text/plain")
             return self._json(404, {"error": "not found"})
+        except SmsError as exc:
+            return self._json(exc.code, {"error": str(exc)})
         except (ValueError, FileNotFoundError) as exc:
             return self._json(400, {"error": str(exc)})
         except Exception:  # noqa: BLE001
@@ -1985,6 +2814,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):  # noqa: N802
         url = urlparse(self.path)
+        if url.path.startswith("/api/v1/"):           # Token-Schnittstelle: kein Cookie, daher kein CSRF-Header nötig
+            try:
+                return self._v1("POST", url, parse_qs(url.query))
+            except SmsError as exc:
+                return self._json(exc.code, {"error": str(exc)})
+            except (ValueError, KeyError) as exc:
+                return self._json(400, {"error": str(exc)})
+            except Exception:  # noqa: BLE001
+                log.exception("API-Fehler bei %s", self.path)
+                return self._json(500, {"error": "internal error"})
         # Schutz vor Aufrufen aus fremden Webseiten (CSRF): der eigene Header löst bei fremden Origins einen Preflight aus
         if self.headers.get("X-Requested-With") != "zte-dash":
             return self._json(403, {"error": "forbidden"})
@@ -2024,7 +2863,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.api.add_spot(body))
             if path == "/api/spots/delete":
                 return self._json(200, self.api.delete_spot(body))
+            if path == "/api/sms/send":
+                return self._json(200, {"ok": True, "message": self.api.sms_send(body.get("number"), body.get("text"), "dashboard")})
+            if path == "/api/sms/read":
+                return self._json(200, {**self.api.sms_mark_read(body.get("ids"), bool(body.get("all")), body.get("read", True) is not False),
+                                        "status": self.api.sms_status()})
+            if path == "/api/sms/delete":
+                return self._json(200, {**self.api.sms_delete(body.get("ids") or []), "status": self.api.sms_status()})
+            if path == "/api/sms/sync":
+                return self._json(200, self.api.sms_sync())
+            if path == "/api/sms/tokens":
+                return self._json(200, self.api.token_create(body))
+            if path == "/api/sms/tokens/delete":
+                return self._json(200, self.api.token_delete(body))
             return self._json(404, {"error": "not found"})
+        except SmsError as exc:
+            return self._json(exc.code, {"error": str(exc)})
+        except (ValueError, KeyError) as exc:
+            return self._json(400, {"error": str(exc)})
+        except Exception:  # noqa: BLE001
+            log.exception("API-Fehler bei %s", self.path)
+            return self._json(500, {"error": "internal error"})
+
+    def do_DELETE(self):  # noqa: N802
+        url = urlparse(self.path)
+        try:
+            if url.path.startswith("/api/v1/"):
+                return self._v1("DELETE", url, parse_qs(url.query))
+            return self._json(404, {"error": "not found"})
+        except SmsError as exc:
+            return self._json(exc.code, {"error": str(exc)})
         except (ValueError, KeyError) as exc:
             return self._json(400, {"error": str(exc)})
         except Exception:  # noqa: BLE001
@@ -2064,6 +2932,37 @@ def probe(cfg):
             print(f"{meth} -> FEHLER: {exc}")
 
 
+def probe_sms(cfg):
+    """Diagnose der SMS-Schnittstelle: zeigt Methoden und Aufbau der Antworten (ohne Nachrichtentexte)."""
+    r = Router(cfg)
+    if not r.can_login:
+        print("Kein Router-Passwort gesetzt (ZTE_PASSWORD oder Dashboard-Einstellungen).")
+        return 1
+    r.login()
+    print("Login OK")
+    try:
+        print("zwrt_wms Methoden:", json.dumps(r.list_methods("zwrt_wms")))
+    except RouterError as exc:
+        print("zwrt_wms list -> FEHLER:", exc)
+    for meth, args in (("zwrt_wms_get_wms_capacity", {}), ("zwrt_get_wms_nvitems", {})):
+        try:
+            print(f"{meth} ->", json.dumps(r.call("zwrt_wms", meth, args, sid=r.sid))[:400])
+        except RouterError as exc:
+            print(f"{meth} -> FEHLER: {exc}")
+    try:
+        d = r.call("zwrt_wms", "zte_libwms_get_sms_data",
+                   {"page": 0, "data_per_page": 500, "mem_store": 1, "tags": 10, "order_by": "order by id desc"}, sid=r.sid)
+        print("zte_libwms_get_sms_data -> Schlüssel:", list(d.keys()))
+        msgs = next((d[k] for k in ("messages", "messages_data", "sms_data") if isinstance(d.get(k), list)), [])
+        print(f"{len(msgs)} Nachrichten; Tags:", dict(Counter(str(m.get('tag')) for m in msgs)))
+        for m in msgs[:3]:
+            print("  Felder:", {k: (f"<{len(str(v))} Zeichen>" if k in ("content", "number") else v) for k, v in m.items()})
+            print("  Datum roh:", m.get("date"), "->", parse_sms_date(m.get("date"), None))
+    except RouterError as exc:
+        print("zte_libwms_get_sms_data -> FEHLER:", exc)
+    return 0
+
+
 def test_reconnect(cfg):
     r = Router(cfg)
     if not r.can_login:
@@ -2083,6 +2982,7 @@ def main():
     ap = argparse.ArgumentParser(description="ZTE G5TS Dashboard")
     ap.add_argument("--probe", action="store_true", help="Router-Antworten anzeigen (Diagnose)")
     ap.add_argument("--once", action="store_true", help="Einmal abfragen, speichern, ausgeben, beenden")
+    ap.add_argument("--probe-sms", action="store_true", help="SMS-Schnittstelle des Routers prüfen (Diagnose)")
     ap.add_argument("--test-reconnect", action="store_true", help="Verbindung einmalig neu aufbauen (mit Rückfrage)")
     ap.add_argument("--reset-auth", action="store_true", help="Dashboard-Passwortschutz abschalten (falls das Passwort vergessen wurde)")
     ap.add_argument("-v", "--verbose", action="store_true")
@@ -2103,6 +3003,12 @@ def main():
             print("FEHLER:", exc)
             sys.exit(1)
         return
+    if args.probe_sms:
+        try:
+            sys.exit(probe_sms(cfg))
+        except RouterError as exc:
+            print("FEHLER:", exc)
+            sys.exit(1)
     if args.test_reconnect:
         sys.exit(test_reconnect(cfg))
     init_db(cfg.db)
@@ -2122,9 +3028,12 @@ def main():
         print(json.dumps(Api(cfg, collector).current(), indent=2))
         return
     monitor = Monitor(cfg, collector)
+    sms = SmsService(cfg, collector)
+    collector.sms = sms
     collector.start()
     monitor.start()
-    Handler.api, Handler.cfg, Handler.auth = Api(cfg, collector, monitor, auth), cfg, auth
+    sms.start()
+    Handler.api, Handler.cfg, Handler.auth = Api(cfg, collector, monitor, auth, sms), cfg, auth
     httpd = ThreadingHTTPServer((cfg.bind, cfg.port), Handler)
     log.info("Dashboard auf http://%s:%d  (Router: %s, Intervall: %ds, Router-Login: %s, Dashboard-Passwort: %s)", cfg.bind, cfg.port,
              cfg.host, cfg.poll, "ja" if collector.router.can_login else "nein - nur Signalwerte", "ja" if auth.enabled else "nein")
@@ -2136,7 +3045,7 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        for t in (collector, monitor):
+        for t in (collector, monitor, sms):
             t.stop_flag.set()
             t.wake.set()
 

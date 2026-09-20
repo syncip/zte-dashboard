@@ -4,7 +4,7 @@ Zeichnet Signalqualität (RSRP, RSRQ, SINR, RSSI, Band, Zelle, Trägeraggregatio
 des ZTE G5TS / MC8830 (Aldi Talk) in SQLite auf und zeigt alles in einem Dashboard.
 Nur Python-Standardbibliothek, keine Abhängigkeiten.
 
-Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **Setup** (Router-Standort finden) · **Einstellungen**.
+Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **SMS** · **Setup** (Router-Standort finden) · **Einstellungen**.
 
 ## Start
 
@@ -49,6 +49,7 @@ Alle Werte lassen sich ohne Neustart ändern und gelten sofort:
 
 - Router-Adresse und -Passwort, Abfrageintervall Signal, Intervall Datenverbrauch, Oberflächen-Aktualisierung, Rohdaten-Tage
 - Tarifgrenze (0 = unbegrenzt) und Abrechnungstag
+- SMS (Abruf-Takt, Sendelimit, Webhook, Router-Speicher leeren)
 - Ping-Ziele (Host, ICMP/TCP, Port), Intervall, Timeout
 - Watchdog (Schwellen, Schutzzeiten, Testmodus)
 - Dashboard-Passwortschutz
@@ -124,6 +125,43 @@ Vorgehen:
 
 Hinweis: Nach dem Umstellen des Routers braucht das Modem ein paar Sekunden, bis Band/Zelle stabil sind – Messung erst dann starten.
 
+## SMS empfangen und senden
+
+Seite **SMS** im Dashboard: **Eingang** (mit Ungelesen-Zähler im Menü), **Gesendet**, **Neue SMS** (mit Zeichen- und Teile-Zähler) und **API**.
+Das Dashboard holt SMS im eingestellten Takt (Standard 60 s, „Jetzt abrufen“ geht sofort) aus dem Router und archiviert sie in der Datenbank.
+Neue SMS erscheinen auch in der Ereignisliste. Gelöschte SMS verschwinden im Dashboard und im Router.
+
+- Voraussetzung: Router-Passwort (Abruf und Versand brauchen den Login). Einstellungen → **SMS**: an/aus, Abruf-Takt, **Sendelimit pro Stunde** (Standard 20, schützt vor Skript-Fehlern und Kosten),
+  optional „Im Router löschen“ (schafft Platz im Router-Speicher; das Archiv im Dashboard bleibt) und ein **Webhook**, der bei jeder neuen SMS ein `POST {"event":"sms_received","message":{…}}` bekommt.
+- Kodierung: Text ohne Sonderzeichen geht als GSM-7 (160 / 153 Zeichen je Teil), mit Sonderzeichen oder Emoji als Unicode (70 / 67). Höchstens 6 Teile je SMS; jeder Teil zählt beim Anbieter als eigene SMS.
+- Die Schnittstelle des Routers (ubus-Objekt `zwrt_wms`: `zte_libwms_get_sms_data`, `zte_libwms_send_sms`, `zwrt_wms_delete_sms`) ist nach der Beschreibung aus der Community umgesetzt und
+  mit dem Mock-Router getestet, **aber noch nicht an einem echten G5TS**. Vor dem ersten Einsatz: `python zte_dash.py --probe-sms` (zeigt Methoden und Aufbau der Antworten ohne Nachrichtentexte),
+  dann im Dashboard „Jetzt abrufen“ und zuerst eine SMS an die eigene Handynummer senden.
+
+### SMS-API für Skripte und Smart Home
+
+Unter **SMS → API** legst du **Tokens** an (Name + Rechte Lesen / Senden / Löschen; der Token wird nur einmal angezeigt, gespeichert wird nur sein Hash). Die Beschreibung mit Beispielen steht dort ebenfalls.
+Kurzform (Basis `http://<dashboard>:8080/api/v1`, Header `Authorization: Bearer <TOKEN>`):
+
+    GET    /sms?box=inbox|sent|all&unread=1&number=…&since_id=…&since=…&q=…&limit=50&order=asc|desc&mark_read=1&wait=30&refresh=1
+    GET    /sms/{id}
+    POST   /sms            {"to": "+491701234567", "text": "Hallo"}      (Recht: Senden)
+    POST   /sms/read       {"ids": [1,2]}  oder  {"all": true}
+    DELETE /sms/{id}       (auch: POST /sms/{id}/delete, POST /sms/delete {"ids": [..]})
+    GET    /status         ungelesen, Sendelimit, letzte Eingangs-ID, Router-Zustand
+
+    curl -H "Authorization: Bearer $TOKEN" "http://<dashboard>:8080/api/v1/sms?unread=1&mark_read=1"
+    curl -X POST http://<dashboard>:8080/api/v1/sms -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"to":"+491701234567","text":"Hallo!"}'
+
+Mit `since_id=<letzte ID>&wait=30` wartet die Anfrage bis zu 30 s auf eine neue SMS (Long-Polling). Fehlercodes: 400 Eingabe, 401 Token, 403 Recht, 404, 409 Router-Passwort fehlt, 429 Sendelimit / zu viele ungültige Tokens, 502 Router.
+Die API gilt unabhängig vom Dashboard-Passwort – für Zugriff aus dem Internet einen HTTPS-Proxy davorsetzen.
+
+## Verbrauchsverlauf in wählbarer Auflösung
+
+Das Verbrauchsdiagramm (Download/Upload) hat eigene Schalter **10 Min · Stunde · Tag · Woche · Monat** und einen Zeitraum (z. B. letzte 24 Std / 7 Tage / 30 Tage / 1 Jahr) – unabhängig von der Zeitraum-Auswahl oben.
+Beim Zoomen zeigt es den gewählten Ausschnitt und wählt bei Bedarf automatisch eine passende Auflösung; ein Klick auf einen Balken zoomt auf diesen Abschnitt.
+10-Minuten-Werte gibt es nur, solange die Rohdaten aufbewahrt werden (Standard 30 Tage), Stundenwerte, Tage, Wochen und Monate dauerhaft. Wochen beginnen am Montag.
+
 ## Prognose Periodenende
 
 Grundlage ist der Monatszähler des Routers. Schätzung = bisher verbraucht (ohne heute) + max(heute, Tagesschnitt) + Tagesschnitt × verbleibende Tage.
@@ -147,6 +185,7 @@ Export: `/api/export.csv?range=30d&kind=signal|ping` (auch mit `from`/`to`; Link
 ## Diagnose
 
     python3 zte_dash.py --probe
+    python3 zte_dash.py --probe-sms     # SMS-Schnittstelle des Routers
 
 Loggt sich ein und listet, was der Router liefert (Antwort von `get_wwandst`, verfügbare ubus-Objekte).
 Wenn der Datenverbrauch leer bleibt: Ausgabe von `--probe` schicken, dann lässt sich der Parser anpassen.

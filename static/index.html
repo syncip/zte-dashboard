@@ -279,6 +279,52 @@ input[type=password], input[type=url] { font: inherit; color: var(--ink); backgr
 .stack { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 .stack input { flex: 1 1 180px; width: auto; }
 .status-line { font-size: 13px; color: var(--ink-2); margin: 4px 0 8px; display: flex; align-items: center; gap: 6px; }
+
+/* Verbrauch: Auflösung */
+.usagectl { display: flex; align-items: center; gap: 8px 10px; flex-wrap: wrap; margin: 2px 0 8px; }
+.usagectl .seg button { padding: 3px 10px; font-size: 12.5px; }
+.usagectl select { width: auto; padding: 3px 8px; font-size: 12.5px; }
+
+/* SMS */
+.nbadge { display: inline-block; min-width: 18px; padding: 0 5px; margin-left: 6px; border-radius: 999px; background: var(--s1); color: #fff; font-size: 11.5px; line-height: 18px; font-weight: 650; text-align: center; }
+.nbadge[hidden] { display: none; }
+.smslist { list-style: none; margin: 0; padding: 0; }
+.sms { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 2px 10px; padding: 12px 2px; border-bottom: 1px solid var(--grid); }
+.sms:last-child { border-bottom: 0; }
+.sms .du { width: 8px; height: 8px; border-radius: 50%; background: var(--s1); margin-top: 6px; }
+.sms.read .du { visibility: hidden; }
+.sms .who { font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; overflow-wrap: anywhere; }
+.sms.unread .who { font-weight: 700; }
+.sms .when { color: var(--muted); font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sms .txt { grid-column: 2 / 4; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.sms .acts { grid-column: 2 / 4; display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.smstools { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 8px; }
+.smstools input[type=search], .compose input[type=text], .compose input[type=tel] { flex: 1 1 200px; width: auto; }
+input[type=search], input[type=tel], textarea { font: inherit; color: var(--ink); background: var(--page); border: 1px solid var(--border); border-radius: 8px; padding: 6px 9px; min-width: 0; width: 100%; }
+textarea { min-height: 140px; resize: vertical; line-height: 1.45; }
+.compose { max-width: 720px; }
+.compose input[type=tel] { width: 100%; flex: none; }
+.compose label.fl { display: block; font-size: 13px; font-weight: 600; margin: 10px 0 4px; }
+.counter { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: 12.5px; color: var(--ink-2); margin: 4px 0 2px; }
+.counter b { color: var(--ink); font-weight: 600; }
+.msgline { display: flex; gap: 8px; align-items: center; font-size: 13px; margin-top: 10px; min-height: 20px; }
+.st { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.docs h3 { font-size: 14px; margin: 20px 0 6px; }
+.docs h3:first-child { margin-top: 4px; }
+.docs p, .docs li { color: var(--ink-2); font-size: 13.5px; }
+.docs li { margin: 3px 0; }
+.docs ul { padding-left: 20px; margin: 4px 0; }
+code { font: 12.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--wash); padding: 1px 5px; border-radius: 5px; color: var(--ink); }
+pre.code { position: relative; background: var(--page); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; overflow: auto; margin: 6px 0 10px; font: 12.5px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; color: var(--ink); white-space: pre; }
+pre.code code { background: none; padding: 0; font: inherit; }
+.copy { position: absolute; top: 6px; right: 6px; }
+.meth { display: inline-block; min-width: 56px; text-align: center; font-weight: 700; font-size: 11.5px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--border); }
+.apitable td { white-space: normal; vertical-align: top; }
+.apitable td:first-child, .apitable td:nth-child(2) { white-space: nowrap; }
+.tokenbox { border: 1px solid var(--border); border-left: 4px solid var(--good); border-radius: 10px; padding: 10px 12px; margin: 10px 0; background: var(--page); }
+.tokenbox code { display: block; margin: 6px 0; padding: 6px 8px; overflow-wrap: anywhere; user-select: all; }
+.permrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
+.permrow label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -297,6 +343,7 @@ input[type=password], input[type=url] { font: inherit; color: var(--ink); backgr
   <nav class="tabs" aria-label="Seiten">
     <a href="#/" data-p="dash">Dashboard</a>
     <a href="#/analysis" data-p="analysis">Auswertung</a>
+    <a href="#/sms" data-p="sms">SMS<span class="nbadge" id="sms-badge" hidden></span></a>
     <a href="#/setup" data-p="setup">Setup</a>
     <a href="#/settings" data-p="settings">Einstellungen</a>
   </nav>
@@ -339,7 +386,7 @@ input[type=password], input[type=url] { font: inherit; color: var(--ink); backgr
   <button type="button" class="btn sm" id="z-back" title="Zum vorherigen Ausschnitt">Zurück</button>
   <button type="button" class="btn sm primary" id="z-reset">Zoom aufheben</button>
 </div>
-<p class="zoomhint" id="zoomhint">Zum Zoomen im Diagramm mit der Maus (oder dem Finger) einen Zeitbereich aufziehen · Doppelklick hebt den Zoom auf · Klick auf einen Tagesbalken zoomt auf den Tag.</p>
+<p class="zoomhint" id="zoomhint">Zum Zoomen im Diagramm mit der Maus (oder dem Finger) einen Zeitbereich aufziehen · Doppelklick hebt den Zoom auf · Klick auf einen Balken im Verbrauchsdiagramm zoomt auf diesen Zeitabschnitt.</p>
 
 <!-- Zeile A: Hero + Kennzahlen -->
 <section class="grid">
@@ -513,6 +560,20 @@ input[type=password], input[type=url] { font: inherit; color: var(--ink); backgr
       <div class="scroll" id="sp-list"></div>
     </div>
   </section>
+</main>
+
+<!-- SMS -->
+<main class="page" id="page-sms" hidden>
+  <div class="filters" role="group" aria-label="SMS">
+    <div class="seg" id="sms-tabs" aria-label="Bereich">
+      <button type="button" data-t="in">Eingang</button><button type="button" data-t="out">Gesendet</button><button type="button" data-t="new">Neue SMS</button><button type="button" data-t="api">API</button>
+    </div>
+    <span class="spacer"></span>
+    <span class="upd" id="sms-info"></span>
+    <button type="button" class="btn" id="sms-sync">Jetzt abrufen</button>
+  </div>
+  <div class="banner" id="sms-banner" hidden role="alert"></div>
+  <section class="grid"><div class="card c12" id="sms-main"></div></section>
 </main>
 
 <!-- Einstellungen -->
@@ -799,7 +860,38 @@ class LineChart {
   clear() { if (this.cross) this.cross.setAttribute("opacity", 0); this.dots && this.dots.replaceChildren(); this.tip.hide(); }
 }
 
-/* ---------- Balkendiagramm (gestapelt, Tage) ---------- */
+/* ---------- Balkendiagramm (gestapelt: Download/Upload je Zeitabschnitt) ---------- */
+const WDAY = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+const isoWeek = (d) => { const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())); const day = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - day); const y0 = new Date(Date.UTC(t.getUTCFullYear(), 0, 1)); return Math.ceil(((t - y0) / 86400000 + 1) / 7); };
+const monthName = (d, long) => d.toLocaleDateString("de-DE", { month: long ? "long" : "short" }).replace(".", "");
+function bucketHead(b, p) {
+  const d = new Date(p.t * 1000), e = new Date((p.t_end - 1) * 1000);
+  if (b === "10m") return `${WDAY[d.getDay()]}, ${dayFmt(p.t)} ${timeFmt(p.t)}–${timeFmt(p.t_end)} Uhr`;
+  if (b === "1h") return `${WDAY[d.getDay()]}, ${dayFmt(p.t)} ${two(d.getHours())}–${two((d.getHours() + 1) % 24)} Uhr`;
+  if (b === "1d") return d.toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric" });
+  if (b === "1w") return `KW ${isoWeek(d)} · ${dayFmt(p.t)}–${dayFmt(e.getTime() / 1000)}${e.getFullYear()}`;
+  return `${monthName(d, true)} ${d.getFullYear()}`;
+}
+/* Beschriftung der Zeitachse: nur an runden Marken, passend zur verfügbaren Breite */
+function bucketTicks(b, pts, slot) {
+  const out = new Array(pts.length).fill(null), n = pts.length;
+  const pick = (opts, perUnit, minPx) => opts.find((k) => perUnit * k >= minPx) || opts[opts.length - 1];
+  if (b === "10m" || b === "1h") {
+    const perHour = b === "10m" ? slot * 6 : slot, hEvery = pick([1, 2, 3, 4, 6, 12, 24], perHour, b === "10m" ? 42 : 30);
+    pts.forEach((p, i) => {
+      const d = new Date(p.t * 1000);
+      if (d.getMinutes() === 0 && d.getHours() % hEvery === 0) out[i] = d.getHours() === 0 ? dayFmt(p.t) : (b === "10m" || perHour * hEvery >= 44) ? `${two(d.getHours())}:00` : two(d.getHours());
+    });
+    return out;
+  }
+  const every = Math.max(1, Math.ceil((b === "1d" ? 46 : 40) / slot));
+  pts.forEach((p, i) => {
+    if ((n - 1 - i) % every) return;
+    const d = new Date(p.t * 1000);
+    out[i] = b === "1d" ? dayFmt(p.t) : b === "1w" ? `KW${isoWeek(d)}` : monthName(d) + (d.getMonth() === 0 || i === 0 ? ` ’${String(d.getFullYear()).slice(2)}` : "");
+  });
+  return out;
+}
 class BarChart {
   constructor(host, o) {
     this.host = host; this.o = Object.assign({ height: 240 }, o);
@@ -807,14 +899,15 @@ class BarChart {
     this.tip = makeTip(host); this.data = null;
     new ResizeObserver(() => this.draw()).observe(host);
   }
-  set(days) { this.data = days; this.draw(); }
+  set(d) { this.data = d; this.draw(); }
   draw() {
-    const days = this.data, svg = this.svg, H = this.o.height;
+    const d = this.data, svg = this.svg, H = this.o.height;
     const W = Math.max(280, this.host.clientWidth);
     svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.replaceChildren();
-    if (!days) return;
+    if (!d) return;
+    const pts = d.points, b = d.bucket;
     const m = { l: 46, r: 8, t: 10, b: 24 }, pw = W - m.l - m.r, ph = H - m.t - m.b;
-    const maxV = Math.max(1, ...days.map((d) => d.rx + d.tx)) / 1e9;
+    const maxV = Math.max(1, ...pts.map((p) => p.rx + p.tx)) / 1e9;
     const sc = niceScale(0, maxV, 4);
     const Y = (gb) => m.t + ph - gb / sc.hi * ph;
     for (const v of sc.ticks) {
@@ -822,44 +915,41 @@ class BarChart {
       const t = svgEl("text", { x: m.l - 8, y: Y(v) + 4, "text-anchor": "end", class: "tick" }, svg); t.textContent = fmt(v, decimalsFor(sc.step));
     }
     svgEl("line", { x1: m.l, x2: W - m.r, y1: m.t + ph, y2: m.t + ph, stroke: "var(--axis)" }, svg);
-    const n = days.length, slot = pw / n, bw = Math.min(24, Math.max(1.5, slot * 0.7));
-    const every = Math.max(1, Math.ceil(46 / slot));
-    const bars = [];
-    days.forEach((d, i) => {
+    const n = pts.length, slot = pw / n, bw = Math.min(b === "1d" || b === "1w" || b === "1M" ? 24 : 18, Math.max(1.5, slot * 0.7));
+    const ticks = bucketTicks(b, pts, slot);
+    pts.forEach((p, i) => {
       const cx = m.l + slot * (i + 0.5), x = cx - bw / 2, g = svgEl("g", {}, svg);
-      const hRx = d.rx / 1e9 / sc.hi * ph, hTx = d.tx / 1e9 / sc.hi * ph;
+      const hRx = p.rx / 1e9 / sc.hi * ph, hTx = p.tx / 1e9 / sc.hi * ph;
       const base = m.t + ph, top = hTx > 0 ? "tx" : "rx";
       const mk = (y, h, color, round) => {
         if (h < 0.5) return;
         const r = round ? Math.min(4, h, bw / 2) : 0;
-        const p = round ? `M${x} ${y + h}V${y + r}Q${x} ${y} ${x + r} ${y}H${x + bw - r}Q${x + bw} ${y} ${x + bw} ${y + r}V${y + h}Z` : `M${x} ${y}H${x + bw}V${y + h}H${x}Z`;
-        svgEl("path", { d: p, style: `fill:${color}` }, g);
+        const dd = round ? `M${x} ${y + h}V${y + r}Q${x} ${y} ${x + r} ${y}H${x + bw - r}Q${x + bw} ${y} ${x + bw} ${y + r}V${y + h}Z` : `M${x} ${y}H${x + bw}V${y + h}H${x}Z`;
+        svgEl("path", { d: dd, style: `fill:${color}` }, g);
       };
-      const gapPx = hRx > 0 && hTx > 0 ? 2 : 0;
+      const gapPx = hRx > 0 && hTx > 0 ? 2 : 0;    // 2 px Abstand zwischen den Flächen
       mk(base - hRx, hRx, "var(--s1)", top === "rx");
       mk(base - hRx - hTx, Math.max(0, hTx - gapPx), "var(--s2)", true);
-      if (hTx > 0 && hRx > 0) { /* die Lücke entsteht durch die um 2 px gekürzte obere Fläche */ }
-      const label = `${dayFmt(Date.parse(d.day + "T12:00:00") / 1000)}: ${bytesStr(d.rx + d.tx)}`;
-      const hit = svgEl("rect", { x: m.l + slot * i, y: m.t, width: slot, height: ph, fill: "transparent", tabindex: 0, "aria-label": label }, svg);
+      if (p.partial) g.dataset.partial = "1";
+      const head = bucketHead(b, p);
+      const hit = svgEl("rect", { x: m.l + slot * i, y: m.t, width: slot, height: ph, fill: "transparent", tabindex: 0, "aria-label": `${head}: ${bytesStr(p.rx + p.tx)}` }, svg);
       const on = () => {
-        g.parentNode.querySelectorAll("g").forEach((o) => (o.style.opacity = o === g ? 1 : 0.45));
-        this.tip.show(cx, m.t, new Date(d.day + "T12:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }), [
-          { color: "var(--s1)", name: "Download", value: bytesStr(d.rx) },
-          { color: "var(--s2)", name: "Upload", value: bytesStr(d.tx) },
-          { name: "Gesamt", value: bytesStr(d.rx + d.tx) }]);
+        svg.querySelectorAll("g").forEach((o) => (o.style.opacity = o === g ? 1 : 0.45));
+        this.tip.show(cx, m.t, head + (p.partial ? " (läuft noch)" : ""), [
+          { color: "var(--s1)", name: "Download", value: bytesStr(p.rx) },
+          { color: "var(--s2)", name: "Upload", value: bytesStr(p.tx) },
+          { name: "Gesamt", value: bytesStr(p.rx + p.tx) }]);
       };
       const off = () => { svg.querySelectorAll("g").forEach((o) => (o.style.opacity = 1)); this.tip.hide(); };
       hit.addEventListener("pointerenter", on); hit.addEventListener("pointermove", on); hit.addEventListener("pointerleave", off);
       hit.addEventListener("focus", on); hit.addEventListener("blur", off); hit.style.outline = "none";
-      if (this.o.onPick) { hit.style.cursor = "pointer"; hit.addEventListener("click", () => this.o.onPick(d.day)); }
-      if ((n - 1 - i) % every === 0) {
-        const t = svgEl("text", { x: cx, y: H - 6, "text-anchor": "middle", class: "tick" }, svg);
-        t.textContent = dayFmt(Date.parse(d.day + "T12:00:00") / 1000);
-      }
+      if (this.o.onPick) { hit.style.cursor = "pointer"; hit.addEventListener("click", () => this.o.onPick(p)); }
+      if (ticks[i]) { const t = svgEl("text", { x: cx, y: H - 6, "text-anchor": "middle", class: "tick" }, svg); t.textContent = ticks[i]; }
     });
-    if (days.every((d) => d.rx + d.tx === 0)) {
+    svg.querySelectorAll("g[data-partial]").forEach((g) => g.setAttribute("opacity", 0.72));
+    if (pts.every((p) => p.rx + p.tx === 0)) {
       const t = svgEl("text", { x: W / 2, y: H / 2, "text-anchor": "middle", class: "empty" }, svg);
-      t.textContent = "Noch kein Datenverbrauch aufgezeichnet";
+      t.textContent = "Kein Datenverbrauch in diesem Zeitraum aufgezeichnet";
     }
   }
 }
@@ -906,7 +996,7 @@ const cards = {
   ping: chartCard($("#card-ping"), { title: "Latenz & Erreichbarkeit", sub: "Antwortzeit je Ziel (Mittelwert je Zeitfenster) · Ausfälle rot hinterlegt, Neustarts als Raute", legend: [], marks: true }),
   snr: chartCard($("#card-snr"), { title: "Signalrauschabstand (SINR)", sub: "Höher ist besser · ab 13 dB gut", legend: LEG_NR, marks: true }),
   rsrq: chartCard($("#card-rsrq"), { title: "Signalqualität (RSRQ)", sub: "Höher (näher an 0) ist besser", legend: LEG_NR, marks: true }),
-  daily: chartCard($("#card-daily"), { title: "Tagesverbrauch", sub: "Letzte 30 Tage in GB", legend: LEG_DU }),
+  daily: chartCard($("#card-daily"), { title: "Verbrauchsverlauf", sub: "Tagesverbrauch", legend: LEG_DU }),
   speed: chartCard($("#card-speed"), { title: "Durchsatz", sub: "Momentane Datenrate in Mbit/s (Mittelwert je Zeitfenster)", legend: LEG_DU, marks: true }),
 };
 const ZOOM = { onZoom: (a, b) => setZoom(a, b), onReset: () => zoomReset() };
@@ -916,7 +1006,7 @@ const charts = {
   snr: new LineChart(cards.snr.chart, { ...ZOOM, height: 200, unit: "dB", decimals: 1, aria: "Verlauf des SINR", area: true, minSpan: 8, thresholds: [{ v: 13, label: "Gut" }, { v: 5, label: "Mittel" }] }),
   rsrq: new LineChart(cards.rsrq.chart, { ...ZOOM, height: 200, unit: "dB", decimals: 1, aria: "Verlauf des RSRQ", area: true, minSpan: 6, thresholds: [{ v: -10, label: "Gut" }, { v: -14, label: "Mittel" }] }),
   speed: new LineChart(cards.speed.chart, { ...ZOOM, height: 220, unit: "Mbit/s", decimals: 1, aria: "Verlauf der Datenrate", floor: 0, minSpan: 4 }),
-  daily: new BarChart(cards.daily.chart, { height: 240, aria: "Tagesverbrauch", onPick: (day) => { const a = Date.parse(day + "T00:00:00") / 1000; setZoom(a, a + 86400); } }),
+  daily: new BarChart(cards.daily.chart, { height: 240, aria: "Verbrauchsverlauf", onPick: (p) => setZoom(p.t, p.t_end) }),
 };
 // Ping-Karte: Statistikzeile + Zieltabelle unter dem Diagramm
 const pingStats = el("div", "pingstats"), pingSum = el("div", "scroll");
@@ -941,7 +1031,7 @@ function markRange() {
   $("#zoombar").hidden = !zoom; $("#zoomhint").hidden = !!zoom;
   if (zoom) $("#zoom-txt").textContent = `${winFmt(zoom.from, zoom.to)} (${fmtDur(zoom.to - zoom.from)})`;
 }
-function reloadAll() { loadHistory(true); loadDaily(); }
+function reloadAll() { loadHistory(true); loadDaily(); loadUsage(); }
 function setZoom(from, to, push = true) {
   const now = nowSec(), minFrom = now - 800 * 86400;
   to = Math.min(Math.round(to), now); from = Math.max(Math.round(from), minFrom);
@@ -1096,7 +1186,7 @@ async function loadHistory(force) {
     if (!total) { const seg = document.createElement("i"); seg.style.flex = "1"; seg.style.background = "var(--wash)"; qb.appendChild(seg); }
     // Ereignisse
     const ev = $("#events"); ev.replaceChildren();
-    const KIND = { cell: "Zellwechsel", offline: "Router offline", online: "Router online", usage: "Datenverbrauch", outage: "Ausfall", outage_end: "Wieder erreichbar", reconnect: "Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus" };
+    const KIND = { cell: "Zellwechsel", offline: "Router offline", online: "Router online", usage: "Datenverbrauch", outage: "Ausfall", outage_end: "Wieder erreichbar", reconnect: "Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus", sms_in: "SMS empfangen", sms_out: "SMS gesendet", sms_fail: "SMS fehlgeschlagen" };
     for (const e of h.events) { const li = el("li"); li.append(el("time", "", dateFmt.format(new Date(e.ts * 1000))), el("span", "badge", KIND[e.kind] || e.kind), el("span", "", e.detail)); ev.appendChild(li); }
     if (!h.events.length) ev.appendChild(el("li", "muted", "Keine Ereignisse im gewählten Zeitraum."));
     // Verbrauch im Zeitraum
@@ -1141,17 +1231,9 @@ async function loadPing() {
   if (cur) renderWatchdog(cur);
 }
 
-async function loadDaily() {
+async function loadDaily() {                      // Abrechnungszeitraum, Limit und Prognose (das Diagramm lädt loadUsage)
   try {
-    let n = DAYS_FOR[range] || 30, end = "";
-    if (zoom) {
-      n = Math.max(7, Math.min(365, Math.ceil((zoom.to - zoom.from) / 86400) + 1));
-      const de = new Date(zoom.to * 1000); end = `&end=${de.getFullYear()}-${two(de.getMonth() + 1)}-${two(de.getDate())}`;
-    }
-    const d = await getJSON(`/api/daily?days=${n}${end}`);
-    charts.daily.set(d.days);
-    $("#card-daily .card-h p").textContent = zoom ? `${n} Tage bis ${dayFmt(zoom.to)} in GB` : `Letzte ${n} Tage in GB`;
-    cards.daily.fillTable(["Tag", "Download", "Upload", "Gesamt"], d.days.slice().reverse().map((x) => [new Date(x.day + "T12:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" }), bytesStr(x.rx), bytesStr(x.tx), bytesStr(x.rx + x.tx)]));
+    const d = await getJSON("/api/daily?days=1");
     const p = d.period, tot = p.rx + p.tx, [v, u] = fmtBytes(tot);
     $("#u-total").replaceChildren(document.createTextNode(v), el("small", "", u));
     const f = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
@@ -1185,6 +1267,56 @@ function renderForecast(d) {
   if (fc.limit_reached_on) parts.push(`Limit voraussichtlich am ${new Date(fc.limit_reached_on + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} erreicht`);
   $("#fc-note").textContent = parts.join(" · ");
   $("#fc-lin").textContent = `Zum Vergleich linear hochgerechnet (wie vnStat): ${bytesStr(fc.linear)}`;
+}
+
+
+/* ---------- Verbrauchsverlauf: Auflösung und Zeitraum wählbar (unabhängig von der Zeitraum-Auswahl oben) ---------- */
+const UB_NAMES = { "10m": "10 Min", "1h": "Stunde", "1d": "Tag", "1w": "Woche", "1M": "Monat" };
+const UB_OPTS = {
+  "10m": [[36, "6 Std"], [144, "24 Std"], [288, "48 Std"]],
+  "1h": [[24, "24 Std"], [72, "3 Tage"], [168, "7 Tage"], [720, "30 Tage"]],
+  "1d": [[14, "14 Tage"], [30, "30 Tage"], [90, "90 Tage"], [365, "1 Jahr"]],
+  "1w": [[12, "12 Wochen"], [26, "26 Wochen"], [52, "52 Wochen"]],
+  "1M": [[6, "6 Monate"], [12, "12 Monate"], [24, "24 Monate"]],
+};
+const UB_DEFAULT = { "10m": 144, "1h": 168, "1d": 30, "1w": 26, "1M": 12 };
+const UB = (() => {
+  let s = {}; try { s = JSON.parse(localStorage.getItem("zte-usage") || "{}"); } catch {}
+  const count = {};
+  for (const k in UB_OPTS) count[k] = UB_OPTS[k].some(([v]) => v === (s.count || {})[k]) ? s.count[k] : UB_DEFAULT[k];
+  return { bucket: UB_OPTS[s.bucket] ? s.bucket : "1d", count };
+})();
+const ubSave = () => { try { localStorage.setItem("zte-usage", JSON.stringify({ bucket: UB.bucket, count: UB.count })); } catch {} };
+const ubBar = el("div", "usagectl"), ubSeg = el("div", "seg"), ubSel = el("select"), ubNote = el("span", "upd");
+ubSeg.setAttribute("role", "group"); ubSeg.setAttribute("aria-label", "Auflösung"); ubSel.setAttribute("aria-label", "Zeitraum des Verbrauchsdiagramms");
+for (const k of Object.keys(UB_NAMES)) { const bt = el("button", "", UB_NAMES[k]); bt.type = "button"; bt.dataset.b = k; ubSeg.appendChild(bt); }
+ubBar.append(ubSeg, ubSel, ubNote);
+cards.daily.root.querySelector(".card-h").after(ubBar);
+function ubSync() {
+  ubSeg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", x.dataset.b === UB.bucket));
+  ubSel.replaceChildren(...UB_OPTS[UB.bucket].map(([v, l]) => { const o = el("option", "", "Letzte " + l); o.value = v; return o; }));
+  ubSel.value = String(UB.count[UB.bucket]); ubSel.disabled = !!zoom;
+  ubSel.title = zoom ? "Im Zoom bestimmt der gewählte Ausschnitt den Zeitraum" : "";
+}
+ubSeg.addEventListener("click", (e) => { const bt = e.target.closest("button"); if (!bt) return; UB.bucket = bt.dataset.b; ubSave(); ubSync(); loadUsage(); });
+ubSel.addEventListener("change", () => { UB.count[UB.bucket] = Number(ubSel.value); ubSave(); loadUsage(); });
+async function loadUsage() {
+  ubSync();
+  try {
+    const url = `/api/usage_series?bucket=${UB.bucket}` + (zoom ? `&from=${zoom.from}&to=${zoom.to}` : `&count=${UB.count[UB.bucket]}`);
+    const d = await getJSON(url);
+    charts.daily.set(d);
+    const b = d.bucket, sel = UB_OPTS[b].find(([v]) => v === UB.count[b]);
+    const what = { "10m": "Verbrauch je 10 Minuten", "1h": "Verbrauch je Stunde", "1d": "Tagesverbrauch", "1w": "Verbrauch je Woche", "1M": "Verbrauch je Monat" }[b];
+    $("#card-daily .card-h p").textContent = `${what} · ${zoom ? "Ausschnitt" : "letzte " + (sel ? sel[1] : d.points.length)} · gesamt ${bytesStr(d.rx + d.tx)}`;
+    const notes = [];
+    if (d.adjusted) notes.push(`Auflösung automatisch auf „${UB_NAMES[b]}“ angepasst`);
+    const step = { "10m": 600, "1h": 3600, "1d": 86400, "1w": 604800, "1M": 2592000 }[b];
+    if (d.coverage_from && d.since < d.coverage_from - step) notes.push(`Werte in dieser Auflösung gibt es erst ab ${new Date(d.coverage_from * 1000).toLocaleDateString("de-DE")}${b === "10m" ? " (Rohdaten werden nur begrenzt aufbewahrt, ältere Zeit gibt es nur noch als Stunden)" : ""}`);
+    ubNote.textContent = notes.join(" · ");
+    const rowFmt = (p) => b === "10m" || b === "1h" ? `${WDAY[new Date(p.t * 1000).getDay()]} ${dayFmt(p.t)} ${timeFmt(p.t)}` : bucketHead(b, p);
+    cards.daily.fillTable(["Zeitraum", "Download", "Upload", "Gesamt"], d.points.slice().reverse().map((p) => [rowFmt(p), bytesStr(p.rx), bytesStr(p.tx), bytesStr(p.rx + p.tx)]));
+  } catch (e) { console.error(e); }
 }
 
 /* ---------- Formularbausteine ---------- */
@@ -1224,7 +1356,7 @@ function targetRow(t) {
 function buildSettings(r) {
   const s = r.settings, g = s.general, cap = r.capabilities, body = $("#set-body");
   SET.data = r; body.replaceChildren();
-  const f = SET.f = { g: {}, ping: {}, wd: {} };
+  const f = SET.f = { g: {}, ping: {}, wd: {}, sms: {} };
 
   // 1. Verbindung zum Router
   const c1 = setCard("Verbindung zum Router", "Adresse und Admin-Passwort der Router-Oberfläche");
@@ -1265,6 +1397,16 @@ function buildSettings(r) {
   f.g.limit_gb = numIn(g.limit_gb, 0, 100000, 0.1); c3.appendChild(frow("Datenlimit (GB)", f.g.limit_gb, "0 = unbegrenzt (kein Fortschrittsbalken, keine Limit-Warnung)."));
   f.g.billing_day = numIn(g.billing_day, 1, 28); c3.appendChild(frow("Abrechnungstag", f.g.billing_day, "Tag, an dem der Zähler des Routers zurückgesetzt wird (1 = Monatsanfang)."));
   body.appendChild(c3);
+
+  // 3b. SMS
+  const sm = s.sms, c3b = setCard("SMS", "Abruf vom Router, Sendelimit und Benachrichtigung");
+  f.sms.enabled = chkIn(sm.enabled); c3b.appendChild(frow("SMS-Funktion aktiv", f.sms.enabled, "Holt SMS regelmäßig aus dem Router (braucht das Router-Passwort) und erlaubt das Senden."));
+  f.sms.interval_s = numIn(sm.interval_s, 10, 3600); c3b.appendChild(frow("SMS abrufen alle … Sekunden", f.sms.interval_s, "So schnell erscheinen neue SMS im Dashboard (mind. 10)."));
+  f.sms.send_limit_per_hour = numIn(sm.send_limit_per_hour, 1, 500); c3b.appendChild(frow("Höchstens … SMS pro Stunde", f.sms.send_limit_per_hour, "Sicherung gegen Skript-Fehler und unerwartete Kosten. Gilt für Dashboard und API."));
+  f.sms.delete_on_router = chkIn(sm.delete_on_router); c3b.appendChild(frow("Im Router löschen", f.sms.delete_on_router, "Übernommene SMS im Router entfernen. Schafft Platz, denn ein voller Router-Speicher kann keine neuen SMS mehr empfangen. Das Archiv im Dashboard bleibt."));
+  f.sms.webhook_url = txtIn(sm.webhook_url, "https://beispiel.de/hook", "url"); c3b.appendChild(frow("Webhook bei neuer SMS", f.sms.webhook_url, "Optional: bei jeder neuen SMS wird ein POST mit den Daten an diese Adresse geschickt."));
+  c3b.appendChild(el("p", "hint", "Tokens für die SMS-API legst du auf der Seite „SMS“ unter „API“ an."));
+  body.appendChild(c3b);
 
   // 4. Sicherheit (eigene Aktionen, nicht Teil von "Speichern")
   body.appendChild(buildSecurity(r.security));
@@ -1349,7 +1491,8 @@ function buildSecurity(sec) {
 
 function collectSettings() {
   const f = SET.f, v = (i) => (i.type === "checkbox" ? i.checked : Number(i.value));
-  const o = { general: { host: f.host.value.trim() }, ping: {}, watchdog: {} };
+  const o = { general: { host: f.host.value.trim() }, ping: {}, watchdog: {}, sms: {} };
+  o.sms = { enabled: f.sms.enabled.checked, delete_on_router: f.sms.delete_on_router.checked, interval_s: Number(f.sms.interval_s.value), send_limit_per_hour: Number(f.sms.send_limit_per_hour.value), webhook_url: f.sms.webhook_url.value.trim() };
   for (const k in f.g) o.general[k] = f.g[k].value === "" ? null : Number(f.g[k].value);
   for (const k in f.ping) o.ping[k] = v(f.ping[k]);
   for (const k in f.wd) o.watchdog[k] = v(f.wd[k]);
@@ -1796,9 +1939,271 @@ function suSpotList(newId) {
   box.appendChild(el("p", "hint", "Gesamtwertung = Ø-Bewertung minus halbe Schwankung: ein ruhiger Standort schlägt einen wechselhaften. In Klammern der Abstand zum besten Standort."));
 }
 
+/* ---------- SMS ---------- */
+const GSM7_BASIC = "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ\u001bÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM7_EXT = "^{}\\[~]|€";
+function smsPlan(text) {
+  const chars = [...text];
+  if (chars.every((c) => GSM7_BASIC.includes(c) || GSM7_EXT.includes(c))) {
+    const u = chars.reduce((a, c) => a + (GSM7_EXT.includes(c) ? 2 : 1), 0);
+    return { gsm: true, chars: chars.length, units: u, per: u <= 160 ? 160 : 153, segments: u === 0 ? 0 : u <= 160 ? 1 : Math.ceil(u / 153) };
+  }
+  const u = text.length;
+  return { gsm: false, chars: chars.length, units: u, per: u <= 70 ? 70 : 67, segments: u <= 70 ? 1 : Math.ceil(u / 67) };
+}
+const SM = { tab: "in", limit: 100, q: "", data: null, status: null, compose: { number: "", text: "" }, flash: null, tokens: null, newToken: null };
+try { const t = localStorage.getItem("zte-sms-tab"); if (["in", "out", "new", "api"].includes(t)) SM.tab = t; } catch {}
+function setSmsBadge(s) {
+  const b = $("#sms-badge"), n = s ? s.unread : 0;
+  b.hidden = !n; b.textContent = n > 99 ? "99+" : String(n); b.title = n ? `${n} ungelesene SMS` : "";
+}
+const smsWhen = (ts) => {
+  const d = new Date(ts * 1000), n = new Date(), t = timeFmt(ts), y = new Date(n.getFullYear(), n.getMonth(), n.getDate() - 1);
+  if (d.toDateString() === n.toDateString()) return `Heute ${t}`;
+  if (d.toDateString() === y.toDateString()) return `Gestern ${t}`;
+  return `${WDAY[d.getDay()]}, ${dayFmt(ts)}${d.getFullYear() !== n.getFullYear() ? d.getFullYear() : ""} ${t}`;
+};
+const ST_LABEL = { sending: ["warn", "wird gesendet …"], sent: ["good", "gesendet"], unconfirmed: ["warn", "angenommen, Zustellung unbestätigt"], failed: ["crit", "fehlgeschlagen"] };
+
+function smsTabMark() { $("#sms-tabs").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.t === SM.tab)); }
+function smsSetTab(t) { SM.tab = t; try { localStorage.setItem("zte-sms-tab", t); } catch {} smsTabMark(); smsLoad(); }
+$("#sms-tabs").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) { SM.flash = null; smsSetTab(b.dataset.t); } });
+$("#sms-sync").addEventListener("click", async () => {
+  const b = $("#sms-sync"); b.disabled = true;
+  try { const r = await api("POST", "/api/sms/sync"); SM.status = r; await smsLoad(); } catch (e) { smsBanner(e.message, true); }
+  b.disabled = false;
+});
+function smsBanner(msg, force) {
+  const b = $("#sms-banner"), s = SM.status;
+  let text = msg || null;
+  if (!text && s) {
+    if (!s.enabled) text = "Die SMS-Funktion ist ausgeschaltet (Einstellungen → SMS).";
+    else if (s.last_error) text = `Router-Abruf fehlgeschlagen: ${s.last_error}`;
+    else if (!s.can_send) text = "Für SMS wird das Router-Passwort benötigt (Einstellungen → Verbindung).";
+  }
+  b.hidden = !text; b.textContent = text || "";
+}
+async function smsLoad() {
+  smsTabMark();
+  try {
+    if (SM.tab === "in" || SM.tab === "out") {
+      const r = await getJSON(`/api/sms?box=${SM.tab === "in" ? "inbox" : "sent"}&limit=${SM.limit}` + (SM.q ? `&q=${encodeURIComponent(SM.q)}` : ""));
+      SM.data = r; SM.status = r.status;
+    } else SM.status = await getJSON("/api/sms/status");
+    if (SM.tab === "api" && !SM.tokens) SM.tokens = (await getJSON("/api/sms/tokens")).tokens;
+    setSmsBadge(SM.status);
+    const s = SM.status;
+    $("#sms-info").textContent = s.last_sync ? `Zuletzt vom Router abgerufen ${timeFmt(s.last_sync)} · alle ${s.interval_s} s` : "";
+    smsBanner();
+    smsRender();
+  } catch (e) { smsBanner("SMS konnten nicht geladen werden: " + e.message, true); }
+}
+function smsRender() {
+  const box = $("#sms-main");
+  if (SM.tab === "in" || SM.tab === "out") return smsRenderList(box);
+  if (SM.tab === "new") return smsRenderCompose(box);
+  return smsRenderApi(box);
+}
+function smsRenderList(box) {
+  const inbox = SM.tab === "in", d = SM.data, focus = document.activeElement && document.activeElement.id === "sms-q";
+  const head = el("div", "card-h"), t = el("div");
+  t.append(el("h2", "", inbox ? "Empfangene SMS" : "Gesendete SMS"), el("p", "", inbox ? `${d.total_inbox} Nachrichten${d.unread ? ` · ${d.unread} ungelesen` : ""}` : `${d.total_sent} Nachrichten · ${SM.status.sent_last_hour} von ${SM.status.send_limit_per_hour} in der letzten Stunde`));
+  head.appendChild(t);
+  const tools = el("div", "smstools");
+  const q = el("input"); q.type = "search"; q.id = "sms-q"; q.placeholder = "Suchen in Text und Nummer"; q.value = SM.q; q.setAttribute("aria-label", "SMS durchsuchen");
+  let tm = null; q.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { SM.q = q.value.trim(); SM.limit = 100; smsLoad(); }, 350); };
+  tools.appendChild(q);
+  if (inbox && d.unread) { const all = el("button", "btn", "Alle als gelesen markieren"); all.type = "button"; all.onclick = async () => { await api("POST", "/api/sms/read", { all: true }); smsLoad(); }; tools.appendChild(all); }
+  const nw = el("button", "btn primary", "Neue SMS"); nw.type = "button"; nw.onclick = () => smsSetTab("new"); tools.appendChild(nw);
+  const ul = el("ul", "smslist");
+  for (const m of d.messages) ul.appendChild(smsRow(m, inbox));
+  box.replaceChildren(head, tools);
+  if (SM.flash) { const f = el("div", "msgline"); f.append(okIcon(SM.flash.ok), document.createTextNode(SM.flash.text)); box.appendChild(f); }
+  box.appendChild(d.messages.length ? ul : el("p", "note", SM.q ? "Keine SMS zu dieser Suche." : inbox ? "Noch keine SMS empfangen." : "Noch keine SMS gesendet."));
+  if (d.count >= SM.limit) { const more = el("button", "btn", "Ältere anzeigen"); more.type = "button"; more.onclick = () => { SM.limit += 200; smsLoad(); }; box.appendChild(more); }
+  if (focus) { const nq = $("#sms-q"); nq.focus(); nq.setSelectionRange(nq.value.length, nq.value.length); }
+}
+function smsRow(m, inbox) {
+  const li = el("li", "sms " + (inbox ? (m.read ? "read" : "unread") : "read"));
+  const who = el("div", "who"); who.appendChild(document.createTextNode((inbox ? "" : "an ") + m.number));
+  if (!inbox) { const [lv, txt] = ST_LABEL[m.status] || ["warn", m.status]; const st = el("span", "st"); st.append(levelIcon(LEVELS[lv === "good" ? 0 : lv === "warn" ? 1 : 3], 12), document.createTextNode(txt)); if (m.detail) st.title = m.detail; who.appendChild(st); }
+  const when = el("div", "when", smsWhen(m.timestamp)); when.title = new Date(m.timestamp * 1000).toLocaleString("de-DE");
+  const acts = el("div", "acts");
+  const btn = (label, fn, cls = "") => { const b = el("button", "btn sm " + cls, label); b.type = "button"; b.onclick = fn; acts.appendChild(b); return b; };
+  btn("Antworten", () => { SM.compose.number = m.number; SM.flash = null; smsSetTab("new"); });
+  if (inbox) btn(m.read ? "Als ungelesen markieren" : "Als gelesen markieren", async () => { await api("POST", "/api/sms/read", { ids: [m.id], read: !m.read }); smsLoad(); });
+  btn("Löschen", async () => { if (confirm("Diese SMS löschen? Sie wird auch im Router entfernt.")) { await api("POST", "/api/sms/delete", { ids: [m.id] }); smsLoad(); } });
+  li.append(el("span", "du"), who, when, el("div", "txt", m.text), acts);
+  return li;
+}
+function smsRenderCompose(box) {
+  const s = SM.status, c = SM.compose;
+  box.replaceChildren();
+  const head = el("div", "card-h"), t = el("div"); t.append(el("h2", "", "Neue SMS senden"), el("p", "", "Die SMS wird über die SIM-Karte des Routers verschickt und nach deinem Tarif abgerechnet.")); head.appendChild(t); box.appendChild(head);
+  const f = el("div", "compose");
+  const lab1 = el("label", "fl", "Empfänger"); lab1.htmlFor = "sms-to";
+  const to = el("input"); to.type = "tel"; to.id = "sms-to"; to.placeholder = "+491701234567"; to.value = c.number; to.autocomplete = "off"; to.spellcheck = false; to.inputMode = "tel";
+  const lab2 = el("label", "fl", "Text"); lab2.htmlFor = "sms-text";
+  const tx = el("textarea"); tx.id = "sms-text"; tx.value = c.text; tx.placeholder = "Nachricht …";
+  const cnt = el("div", "counter");
+  const msg = el("div", "msgline"); msg.setAttribute("role", "status");
+  const go = el("button", "btn primary", "SMS senden"); go.type = "button";
+  const upd = () => {
+    const p = smsPlan(tx.value); c.number = to.value; c.text = tx.value;
+    cnt.replaceChildren();
+    const sp = (k, v) => { const x = el("span"); x.append(document.createTextNode(k + " "), el("b", "", v)); cnt.appendChild(x); };
+    sp("Zeichen:", `${p.chars}`); sp("SMS-Teile:", p.segments ? `${p.segments}` : "–");
+    sp("Kodierung:", p.gsm ? `Standard (${p.per} Zeichen je Teil)` : `Unicode wegen Sonderzeichen/Emoji (${p.per} Zeichen je Teil)`);
+    if (p.segments > 6) sp("", "zu lang (höchstens 6 Teile)");
+    go.disabled = !(s.can_send) || !to.value.trim() || !tx.value.trim() || p.segments > 6;
+  };
+  to.oninput = tx.oninput = upd;
+  go.onclick = async () => {
+    go.disabled = true; msg.replaceChildren(document.createTextNode("Wird gesendet … (das kann einige Sekunden dauern)"));
+    try {
+      const r = await api("POST", "/api/sms/send", { number: to.value, text: tx.value });
+      SM.compose = { number: "", text: "" };
+      SM.flash = { ok: r.message.status === "sent" ? true : null, text: r.message.status === "sent" ? `SMS an ${r.message.number} gesendet.` : `SMS an ${r.message.number}: ${r.message.detail || "vom Router angenommen"}` };
+      smsSetTab("out");
+    } catch (e) { msg.replaceChildren(okIcon(false), document.createTextNode(e.message)); upd(); }
+  };
+  const row = el("div", "stack"); row.append(go, el("span", "label", `${s.sent_last_hour} von ${s.send_limit_per_hour} SMS in der letzten Stunde`));
+  f.append(lab1, to, lab2, tx, cnt, row, msg);
+  f.appendChild(el("p", "hint", "Rufnummern mit Ländervorwahl schreiben (+49 …). Kurzwahl- und Premiumnummern können zusätzliche Kosten verursachen."));
+  box.appendChild(f);
+  upd();
+  if (!c.number) to.focus(); else tx.focus();
+}
+
+/* ---------- SMS-API: Tokens und Beschreibung ---------- */
+const copyText = async (txt, btn) => {
+  try { await navigator.clipboard.writeText(txt); } catch { const ta = el("textarea"); ta.value = txt; document.body.appendChild(ta); ta.select(); try { document.execCommand("copy"); } catch {} ta.remove(); }
+  if (btn) { const o = btn.textContent; btn.textContent = "Kopiert"; setTimeout(() => (btn.textContent = o), 1400); }
+};
+function codeBlock(txt) {
+  const pre = el("pre", "code"), code = el("code", "", txt); pre.appendChild(code);
+  const b = el("button", "btn sm copy", "Kopieren"); b.type = "button"; b.onclick = () => copyText(txt, b); pre.appendChild(b);
+  return pre;
+}
+function smsRenderApi(box) {
+  box.replaceChildren();
+  const base = `${location.origin}/api/v1`;
+  const head = el("div", "card-h"), t = el("div"); t.append(el("h2", "", "SMS-API"), el("p", "", "Andere Programme, Skripte oder Smart-Home-Systeme können damit SMS lesen und senden.")); head.appendChild(t); box.appendChild(head);
+
+  // Tokens
+  box.appendChild(el("div", "sec", "Zugangs-Tokens"));
+  box.appendChild(el("p", "hint", "Jedes Programm bekommt einen eigenen Token mit genau den Rechten, die es braucht. Der Token wird nur einmal angezeigt und lässt sich jederzeit wieder löschen."));
+  if (SM.newToken) {
+    const tb = el("div", "tokenbox"); tb.append(el("b", "", "Neuer Token – jetzt kopieren, er wird nicht noch einmal angezeigt"), el("code", "", SM.newToken));
+    const cp = el("button", "btn sm", "Kopieren"); cp.type = "button"; cp.onclick = () => copyText(SM.newToken, cp);
+    const cl = el("button", "btn sm", "Ausblenden"); cl.type = "button"; cl.style.marginLeft = "6px"; cl.onclick = () => { SM.newToken = null; smsRender(); };
+    tb.append(cp, cl); box.appendChild(tb);
+  }
+  const tokens = SM.tokens || [];
+  if (tokens.length) {
+    const tbl = el("table", "apitable"), th = el("thead"), tr = el("tr");
+    ["Name", "Rechte", "Token", "Zuletzt genutzt", "Aufrufe", ""].forEach((c, i) => tr.appendChild(el("th", i === 4 ? "num" : "", c))); th.appendChild(tr); tbl.appendChild(th);
+    const tb = el("tbody");
+    for (const k of tokens) {
+      const r = el("tr"), perms = [k.can_read && "Lesen", k.can_send && "Senden", k.can_delete && "Löschen"].filter(Boolean).join(", ");
+      const del = el("button", "btn sm", "Löschen"); del.type = "button";
+      del.onclick = async () => { if (confirm(`Token „${k.name}“ löschen? Programme, die ihn verwenden, verlieren sofort den Zugriff.`)) { SM.tokens = (await api("POST", "/api/sms/tokens/delete", { id: k.id })).tokens; smsRender(); } };
+      const dd = el("td"); dd.appendChild(del);
+      r.append(el("td", "", k.name), el("td", "", perms), el("td", "", k.prefix + "…"), el("td", "", k.last_used ? smsWhen(k.last_used) : "noch nie"), el("td", "num", String(k.uses)), dd);
+      tb.appendChild(r);
+    }
+    tbl.appendChild(tb); const w = el("div", "scroll"); w.appendChild(tbl); box.appendChild(w);
+  } else box.appendChild(el("p", "note", "Noch kein Token angelegt."));
+  const form = el("div", "smstools"); form.style.marginTop = "10px";
+  const name = el("input"); name.type = "text"; name.maxLength = 40; name.placeholder = "Name, z. B. Home Assistant"; name.setAttribute("aria-label", "Name des Tokens");
+  const pr = el("div", "permrow");
+  const perm = (k, l, on) => { const lb = el("label"), c = chkIn(on); c.dataset.k = k; lb.append(c, document.createTextNode(l)); pr.appendChild(lb); return c; };
+  const pR = perm("read", "Lesen", true), pS = perm("send", "Senden", false), pD = perm("delete", "Löschen", false);
+  const mk = el("button", "btn primary", "Token erzeugen"); mk.type = "button";
+  const err = el("span", "label");
+  mk.onclick = async () => {
+    try {
+      const r = await api("POST", "/api/sms/tokens", { name: name.value, perms: [pR.checked && "read", pS.checked && "send", pD.checked && "delete"].filter(Boolean) });
+      SM.newToken = r.token; SM.tokens = r.tokens; smsRender();
+    } catch (e) { err.textContent = e.message; }
+  };
+  form.append(name, pr, mk, err); box.appendChild(form);
+
+  // Beschreibung
+  const docs = el("div", "docs");
+  docs.appendChild(el("h3", "", "Grundlagen"));
+  const ul = el("ul");
+  for (const x of [
+    ["Basis-Adresse: ", base],
+    ["Anmeldung: HTTP-Header ", "Authorization: Bearer <TOKEN>", " (alternativ Header ", "X-API-Key: <TOKEN>", "). Der Token gehört nur in den Header, nie in die Adresse."],
+  ]) { const li = el("li"); x.forEach((p, i) => li.appendChild(i % 2 ? el("code", "", p) : document.createTextNode(p))); ul.appendChild(li); }
+  const li3 = el("li", "", "Antworten sind immer JSON. Bei POST kann der Body JSON oder ein Formular (application/x-www-form-urlencoded) sein."); ul.appendChild(li3);
+  ul.appendChild(el("li", "", "Die API funktioniert unabhängig vom Dashboard-Passwort – wer den Token hat, hat die freigegebenen Rechte. Für Zugriff aus dem Internet gehört ein HTTPS-Proxy davor."));
+  docs.appendChild(ul);
+
+  docs.appendChild(el("h3", "", "Endpunkte"));
+  const rows = [
+    ["GET", "/sms", "Lesen", "SMS auflisten (Eingang, Gesendet oder alle) – Filter siehe unten"],
+    ["GET", "/sms/{id}", "Lesen", "Eine SMS abrufen"],
+    ["POST", "/sms", "Senden", "SMS senden: {\"to\": \"+491701234567\", \"text\": \"Hallo\"}  (Alias: /sms/send)"],
+    ["POST", "/sms/read", "Lesen", "Als gelesen markieren: {\"ids\": [1, 2]} oder {\"all\": true}"],
+    ["POST", "/sms/{id}/read", "Lesen", "Eine SMS als gelesen markieren"],
+    ["DELETE", "/sms/{id}", "Löschen", "SMS löschen (auch im Router). Alternativ: POST /sms/{id}/delete oder POST /sms/delete mit {\"ids\": [..]}"],
+    ["GET", "/status", "beliebig", "Zustand: ungelesene SMS, Sendelimit, letzte Eingangs-ID, Router-Verbindung"],
+  ];
+  const dt = el("table", "apitable"), dth = el("thead"), dtr = el("tr");
+  ["Methode", "Pfad", "Recht", "Beschreibung"].forEach((c) => dtr.appendChild(el("th", "", c))); dth.appendChild(dtr); dt.appendChild(dth);
+  const dtb = el("tbody");
+  for (const r of rows) { const tr = el("tr"); const m = el("td"); m.appendChild(el("span", "meth", r[0])); tr.append(m, el("td", "", r[1]), el("td", "", r[2]), el("td", "", r[3])); dtb.appendChild(tr); }
+  dt.appendChild(dtb); const dw = el("div", "scroll"); dw.appendChild(dt); docs.appendChild(dw);
+
+  docs.appendChild(el("h3", "", "Parameter für GET /sms"));
+  const pu = el("ul");
+  for (const [k, v] of [
+    ["box", "inbox (Standard), sent oder all"], ["unread", "1 = nur ungelesene"], ["number", "nur Nachrichten von/an diese Nummer (Schreibweise egal, verglichen werden die letzten 9 Ziffern)"],
+    ["since_id", "nur SMS mit größerer ID (zum Nachladen; Sortierung dann aufsteigend)"], ["since", "nur SMS ab diesem Zeitpunkt (Unix-Zeit in Sekunden)"], ["q", "Textsuche in Text und Nummer"],
+    ["limit", "1–500, Standard 50"], ["order", "asc oder desc (Standard desc)"], ["mark_read", "1 = die gelieferten ungelesenen SMS gleich als gelesen markieren"],
+    ["wait", "Sekunden (bis 60), zusammen mit since_id: die Anfrage wartet, bis eine neue SMS eintrifft (Long-Polling)"],
+    ["refresh", "1 = vorher sofort im Router nachsehen (sonst gilt der Abruf-Takt aus den Einstellungen)"],
+  ]) { const li = el("li"); li.append(el("code", "", k), document.createTextNode(" – " + v)); pu.appendChild(li); }
+  docs.appendChild(pu);
+
+  docs.appendChild(el("h3", "", "Beispiele"));
+  docs.appendChild(el("p", "", "Ungelesene SMS abholen und gleich als gelesen markieren:"));
+  docs.appendChild(codeBlock(`curl -H "Authorization: Bearer $TOKEN" \\\n  "${base}/sms?unread=1&mark_read=1"`));
+  docs.appendChild(el("p", "", "SMS senden:"));
+  docs.appendChild(codeBlock(`curl -X POST "${base}/sms" \\\n  -H "Authorization: Bearer $TOKEN" \\\n  -H "Content-Type: application/json" \\\n  -d '{"to": "+491701234567", "text": "Hallo vom Router!"}'`));
+  docs.appendChild(el("p", "", "Auf neue SMS warten (Long-Polling). Die Zahl bei since_id ist last_id aus der vorherigen Antwort bzw. last_inbox_id aus /status:"));
+  docs.appendChild(codeBlock(`curl -H "Authorization: Bearer $TOKEN" \\\n  "${base}/sms?since_id=42&wait=30&refresh=1"`));
+  docs.appendChild(el("p", "", "Python:"));
+  docs.appendChild(codeBlock(`import requests\n\nAPI = "${base}"\nH = {"Authorization": "Bearer DEIN_TOKEN"}\n\n# neue SMS abholen\nfor m in requests.get(f"{API}/sms", params={"unread": 1, "mark_read": 1}, headers=H).json()["messages"]:\n    print(m["number"], m["text"])\n\n# senden\nr = requests.post(f"{API}/sms", json={"to": "+491701234567", "text": "Hallo!"}, headers=H)\nprint(r.status_code, r.json())`));
+
+  docs.appendChild(el("h3", "", "Aufbau einer SMS"));
+  docs.appendChild(codeBlock(`{\n  "id": 17,\n  "box": "inbox",              // inbox oder sent\n  "number": "+4915112345678",    // Absender bzw. Empfänger\n  "text": "Hallo!",\n  "timestamp": 1789922146,        // Unix-Zeit\n  "time": "2026-09-20T18:35:46+02:00",\n  "read": false,\n  "status": "sent"                // nur bei gesendeten: sending, sent, unconfirmed, failed\n}`));
+  docs.appendChild(el("p", "", "Die Liste kommt als {\"count\", \"messages\": [...], \"unread\", \"last_id\"}, eine gesendete SMS als {\"ok\": true, \"message\": {..., \"segments\": 1}}."));
+
+  docs.appendChild(el("h3", "", "Fehlercodes"));
+  const eu = el("ul");
+  for (const [k, v] of [["400", "Eingabe ungültig (z. B. Rufnummer oder leerer Text)"], ["401", "Token fehlt oder ist ungültig (nach mehreren Fehlversuchen kurze Sperre: 429)"], ["403", "Dem Token fehlt das Recht"], ["404", "SMS oder Pfad nicht gefunden"],
+    ["409", "Kein Router-Passwort hinterlegt"], ["429", "Sendelimit pro Stunde erreicht oder zu viele ungültige Token-Versuche"], ["502", "Der Router hat die SMS abgelehnt oder ist nicht erreichbar"]]) { const li = el("li"); li.append(el("code", "", k), document.createTextNode(" – " + v)); eu.appendChild(li); }
+  docs.appendChild(eu);
+
+  docs.appendChild(el("h3", "", "Hinweise"));
+  const hu = el("ul");
+  for (const x of [
+    "Das Dashboard holt SMS in dem Takt aus dem Router, der unter Einstellungen → SMS steht (Standard 60 s). Mit refresh=1 oder „Jetzt abrufen“ geht es sofort.",
+    "Sonderzeichen und Emoji erzwingen die Unicode-Kodierung: dann passen nur 70 Zeichen in eine SMS (67 bei mehreren Teilen), sonst 160 (153). Höchstens 6 Teile je SMS. Jeder Teil zählt beim Anbieter als eigene SMS.",
+    "Pro Stunde werden höchstens so viele SMS gesendet, wie unter Einstellungen → SMS eingestellt ist (Standard 20). Das schützt vor Endlosschleifen in Skripten und unerwarteten Kosten.",
+    "Alle SMS werden zusätzlich im Dashboard archiviert. Gelöschte SMS verschwinden aus Dashboard und Router.",
+    "Statt Abfragen kann das Dashboard neue SMS auch aktiv melden: Einstellungen → SMS → Webhook. Bei jeder neuen SMS wird dann ein POST mit {\"event\": \"sms_received\", \"message\": {...}} an die Adresse geschickt.",
+  ]) hu.appendChild(el("li", "", x));
+  docs.appendChild(hu);
+  box.appendChild(docs);
+}
+
 /* ---------- Seitenwechsel (Hash-Routing) ---------- */
-const PAGES = ["dash", "analysis", "setup", "settings"];
-const PAGE_TITLE = { dash: "Dashboard", analysis: "Auswertung", setup: "Setup", settings: "Einstellungen" };
+const PAGES = ["dash", "analysis", "sms", "setup", "settings"];
+const PAGE_TITLE = { dash: "Dashboard", analysis: "Auswertung", sms: "SMS", setup: "Setup", settings: "Einstellungen" };
 const routeState = { cur: null };
 let lastDash = 0;
 const pageFromHash = () => { const h = location.hash.replace(/^#\/?/, ""); return PAGES.includes(h) ? h : "dash"; };
@@ -1815,12 +2220,13 @@ function showPage(p) {
   window.scrollTo(0, 0);
   if (p === "dash" && Date.now() - lastDash > 20000) { lastDash = Date.now(); reloadAll(); }
   if (p === "analysis") { markA(); if (!A.data || Date.now() - A.loaded > 60000) loadAnalysis(); else renderAnalysis(); }
+  if (p === "sms") { SM.flash = null; smsLoad(); }
   if (p === "setup") suStart();
   if (p === "settings") loadSettings();
 }
 window.addEventListener("hashchange", () => showPage(pageFromHash()));
 
-async function tickCurrent() { try { renderCurrent(await getJSON("/api/current")); } catch (e) { $("#ptxt").textContent = "Dashboard-Server nicht erreichbar"; $("#pdot").className = "dot off"; } }
+async function tickCurrent() { try { const c = await getJSON("/api/current"); renderCurrent(c); setSmsBadge(c.sms); } catch (e) { $("#ptxt").textContent = "Dashboard-Server nicht erreichbar"; $("#pdot").className = "dot off"; } }
 
 /* Regelmäßige Aktualisierung: Takt aus den Einstellungen, nur bei sichtbarem Tab und passender Seite */
 function every(fn, secs) {
@@ -1829,7 +2235,8 @@ function every(fn, secs) {
 }
 every(tickCurrent, () => uiRefresh);
 every(() => { if (routeState.cur === "dash" && !(zoom && zoom.to < nowSec() - 90)) { lastDash = Date.now(); return loadHistory(); } }, () => Math.max(15, uiRefresh * 6));
-every(() => { if (routeState.cur === "dash" && !zoom) return loadDaily(); }, () => Math.max(30, uiRefresh * 12));
+every(() => { if (routeState.cur === "dash" && !zoom) return Promise.all([loadDaily(), loadUsage()]); }, () => Math.max(30, uiRefresh * 12));
+every(() => { if (routeState.cur === "sms" && (SM.tab === "in" || SM.tab === "out") && !(document.activeElement && document.activeElement.id === "sms-q")) return smsLoad(); }, () => Math.max(5, uiRefresh * 2));
 
 tickCurrent();
 showPage(pageFromHash());

@@ -49,7 +49,35 @@ def init_counters():
     COUNTERS.update(rx_m=rx, tx_m=tx, day_rx=drx, day_tx=dtx, last=now)
 
 
-STATE = {"fail": 0, "select": "4G_AND_5G", "reg_until": 0.0, "log": []}
+STATE = {"fail": 0, "select": "4G_AND_5G", "reg_until": 0.0, "log": [], "sms_fail": False}
+SMS = []               # Nachrichtenspeicher des Mock-Routers (wie zwrt_wms: tag 0 gelesen, 1 ungelesen, 2 gesendet, 3 fehlgeschlagen)
+SMS_NEXT = [1]
+
+
+def _hex(t):
+    return t.encode("utf-16-be").hex().upper()
+
+
+def sms_add(number, text, tag, when=None):
+    from datetime import datetime
+    lt = datetime.fromtimestamp(when or time.time()).astimezone()
+    off = lt.utcoffset().total_seconds() / 3600
+    tz = "0" if off == 0 else (f"+{off:g}" if off > 0 else f"{off:g}")
+    date = ",".join([lt.strftime("%y"), lt.strftime("%m"), lt.strftime("%d"), lt.strftime("%H"), lt.strftime("%M"), lt.strftime("%S"), tz])
+    SMS.append({"id": str(SMS_NEXT[0]), "number": number, "content": _hex(text), "tag": str(tag), "date": date,
+                "mem_store": "1", "draft_group_id": ""})
+    SMS_NEXT[0] += 1
+
+
+def sms_seed():
+    now = time.time()
+    sms_add("+491701234567", "Hallo! Dein Aldi-Talk-Guthaben wurde aufgeladen.", 0, now - 86400 * 3)
+    sms_add("Aldi Talk", "Dein Datenvolumen ist zu 80 % verbraucht. Grüße dein ALDI TALK Team", 0, now - 86400)
+    sms_add("+4915112345678", "Kommst du heute Abend? Bringe bitte Brot mit 🍞", 1, now - 3600 * 3)
+    sms_add("+4915112345678", "Ja, bis später!", 2, now - 3600 * 2)
+
+
+sms_seed()
 
 
 def profile(t):
@@ -113,10 +141,32 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def do_GET(self):  # noqa: N802
+        """Steuerung für Tests: /mock/incoming?number=..&text=..  und  /mock/smsfail?on=1"""
+        from urllib.parse import urlparse, parse_qs
+        u = urlparse(self.path)
+        q = parse_qs(u.query)
+        if u.path == "/mock/incoming":
+            sms_add(q.get("number", ["+4917099999999"])[0], q.get("text", ["Test-SMS"])[0], 1)
+            msg = "ok"
+        elif u.path == "/mock/smsfail":
+            STATE["sms_fail"] = q.get("on", ["1"])[0] == "1"
+            msg = "ok"
+        else:
+            msg = "mock"
+        data = msg.encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
     def do_POST(self):  # noqa: N802
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"[]")
         out = []
         for req in body if isinstance(body, list) else [body]:
+            if req.get("method") == "list":
+                out.append({"jsonrpc": "2.0", "id": req.get("id"), "result": [0, {"zte_libwms_get_sms_data": {}, "zte_libwms_send_sms": {}, "zwrt_wms_delete_sms": {}}]})
+                continue
             sid, obj, method, args = (req.get("params") + [{}])[:4]
             out.append({"jsonrpc": "2.0", "id": req.get("id"), **self.dispatch(sid, obj, method, args or {})})
         data = json.dumps(out).encode()
@@ -162,6 +212,29 @@ class Handler(BaseHTTPRequestHandler):
             if args.get("type") not in (2, 4):      # wie der echte Router: ohne type -> Invalid argument
                 return {"result": [2]}
             return {"result": [0, wwandst(time.time())]}
+        if obj == "zwrt_wms":
+            if not authed:
+                return denied
+            if method == "zte_libwms_get_sms_data":
+                return {"result": [0, {"messages": list(reversed(SMS))}]}
+            if method == "zte_libwms_send_sms":
+                if STATE["sms_fail"]:
+                    return {"result": [0, {"result": 2}]}
+                text = bytes.fromhex(args.get("message_body", "")).decode("utf-16-be")
+                num = args.get("number", "")
+                d = str(args.get("sms_time", "")).replace(";", ",")
+                SMS.append({"id": str(SMS_NEXT[0]), "number": num, "content": args.get("message_body", ""), "tag": "2",
+                            "date": d, "mem_store": "1", "draft_group_id": ""})
+                SMS_NEXT[0] += 1
+                print(f"send_sms -> {num}: {text!r} ({args.get('encode_type')}, id={args.get('id')!r})", flush=True)
+                return {"result": [0, {"result": 3}]}
+            if method == "zwrt_wms_get_cmd_status":
+                return {"result": [0, {"sms_cmd_status_result": "3"}]}
+            if method == "zwrt_wms_delete_sms":
+                ids = {x for x in str(args.get("id", "")).split(";") if x}
+                SMS[:] = [m for m in SMS if m["id"] not in ids]
+                print("delete_sms ->", sorted(ids), flush=True)
+                return {"result": [0, {"result": 3}]}
         return {"error": {"code": -32000, "message": "Object not found"}}
 
 
