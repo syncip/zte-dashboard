@@ -1256,6 +1256,9 @@ NUM_RE = re.compile(r"^\+?[0-9]{3,20}$")
 NONDIGIT_RE = re.compile(r"\D")
 
 
+SMS_FAIL_HINT = " (häufige Ursachen: SMS-Zentrale/SMSC im Router nicht eingetragen, SMS-Versand für die SIM nicht freigeschaltet, z. B. reine Daten-SIM, oder kein Netz)"
+
+
 class SmsError(Exception):
     """Fehler mit passendem HTTP-Status (400 Eingabe, 403 Recht, 404 unbekannt, 429 Limit, 502 Router)."""
 
@@ -1986,11 +1989,11 @@ class SmsService(threading.Thread):
                     res = self.router.sms_send(number, text, plan, ts)
                     ok = sms_accepted(res)
                     if ok is False:
-                        status, detail = "failed", "Der Router hat die SMS abgelehnt"
+                        status, detail = "failed", "Der Router hat die SMS abgelehnt" + SMS_FAIL_HINT
                     else:
                         state = self.router.sms_send_state()
                         if state is False:
-                            status, detail = "failed", "Der Versand ist fehlgeschlagen (Router-Status)"
+                            status, detail = "failed", "Der Versand ist fehlgeschlagen (Router-Status)" + SMS_FAIL_HINT
                         elif state is None or ok is None:
                             status, detail = "unconfirmed", "Vom Router angenommen, Zustellung nicht bestätigt"
                 except RouterError as exc:
@@ -3292,7 +3295,7 @@ def probe_sms(cfg):
         print("SMS-Feldverschlüsselung:", "aktiv (AES-GCM, Schlüsselaustausch OK)" if key else "nicht nötig (Klartext)")
     except (RouterError, ValueError) as exc:
         print("SMS-Feldverschlüsselung -> FEHLER:", exc)
-    for meth, args in (("zwrt_wms_get_wms_capacity", {}), ("zwrt_get_wms_nvitems", {})):
+    for meth, args in (("zwrt_wms_get_wms_capacity", {}), ("zwrt_get_wms_nvitems", {}), ("zte_wms_get_parameter", {})):
         try:
             print(f"{meth} ->", json.dumps(r.call("zwrt_wms", meth, args, sid=r.sid))[:400])
         except RouterError as exc:
@@ -3346,7 +3349,10 @@ def test_sms(cfg, number):
                 return 2
             continue
         print(f"{i:2d}. {shown} -> ANGENOMMEN: {json.dumps(res)}")
-        print("Versandstatus:", r.sms_send_state())
+        state = r.sms_send_state()
+        print("Versandstatus:", state)
+        if state is False:
+            print("Der Router hat den Auftrag angenommen, das Netz/die SIM hat den Versand aber abgelehnt." + SMS_FAIL_HINT)
         return 0
     print("\nKeine Schreibweise wurde akzeptiert.")
     return 2
