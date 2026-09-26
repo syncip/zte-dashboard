@@ -51,11 +51,13 @@ def init_counters():
 
 SA_ALL = "1,3,8,28,41,77,78,7,20,38,40,75"
 LTE_ALL = "0x7a0880800c5"
-LOCK = {"sa": SA_ALL, "lte": LTE_ALL, "nr_cell": ""}
+LOCK = {"sa": SA_ALL, "lte": LTE_ALL, "nr_cell": "0,0,0", "lte_cell": "0,0"}
 # Zellen, die der Mock als aktive Zelle kennt: (pci, arfcn) -> (band, bandbreite, RSRP-Versatz)
 MOCK_CELLS = {(768, 641760): ("n78", 90, 0), (115, 641760): ("n78", 90, -4), (970, 641760): ("n78", 90, -9),
               (870, 431070): ("n1", 20, -9)}
-LOCK_SIG = {"nwinfo_set_sa_bandlock": {"nr5g_sa_band_lock": "String"}, "nwinfo_lock_nr_cell": {"lock_nr_cell": "String"},
+LOCK_SIG = {"nwinfo_set_sa_bandlock": {"nr5g_sa_band_lock": "String"},
+            "nwinfo_lock_nr_cell": {"lock_nr_pci": "String", "lock_nr_earfcn": "String", "lock_nr_cell_band": "String"},
+            "nwinfo_lock_lte_cell": {"lock_lte_pci": "String", "lock_lte_earfcn": "String"},
             "nwinfo_set_lte_ext_band": {"lte_band_lock": "String"}, "nwinfo_reset_band_cell_setting": {},
             "nwinfo_get_netinfo": {}, "nwinfo_set_netselect": {"net_select": "String"}}
 STATE = {"fail": 0, "select": "4G_AND_5G", "reg_until": 0.0, "log": [], "sms_fail": False}
@@ -178,9 +180,9 @@ def profile(t, live=False):
     if seg == 9:
         net, band, rsrp = "LTE", "B3", None
         lte = -99 + 4 * slow + r.gauss(0, 1.8)
-    if live and (LOCK["nr_cell"] or LOCK["sa"] != SA_ALL):   # Sperre (nur im Live-Mock, nicht in den Demodaten)
+    if live and (LOCK["nr_cell"] != "0,0,0" or LOCK["sa"] != SA_ALL):   # Sperre (nur im Live-Mock, nicht in den Demodaten)
         want = None
-        if LOCK["nr_cell"]:
+        if LOCK["nr_cell"] != "0,0,0":
             f = LOCK["nr_cell"].split(",")
             want = MOCK_CELLS.get((int(f[0]), int(f[1])))
             if not want:                                       # Zelle gibt es hier nicht -> kein Netz
@@ -227,7 +229,7 @@ def netinfo(t, live=False):
             "nr_neighbor_cell": "768,641760;115,641760;970,641760;513,641760;381,641760;870,431070;153,641760;" if nr else "",
             "lte_neighbor_cell": "", "lte_band": "1,3,7,8,20,28,32,38,40,41,42,43",
             "nr5g_sa_band_lock": LOCK["sa"], "nr5g_nsa_band_lock": "", "nr5g_nrdc_band_lock": "",
-            "lte_band_lock": LOCK["lte"], "gw_band_lock": "0x000000000", "lock_nr_cell": LOCK["nr_cell"], "lock_lte_cell": ""}
+            "lte_band_lock": LOCK["lte"], "gw_band_lock": "0x000000000", "lock_nr_cell": LOCK["nr_cell"], "lock_lte_cell": LOCK["lte_cell"]}
 
 
 def wwandst(now):
@@ -348,13 +350,15 @@ class Handler(BaseHTTPRequestHandler):
                 print(method, "-> INVALID ARGUMENT", args, flush=True)
                 return {"result": [2]}
             if method == "nwinfo_reset_band_cell_setting":
-                LOCK.update(sa=SA_ALL, lte=LTE_ALL, nr_cell="")
+                LOCK.update(sa=SA_ALL, lte=LTE_ALL, nr_cell="0,0,0", lte_cell="0,0")
             elif method == "nwinfo_set_sa_bandlock":
                 LOCK["sa"] = args["nr5g_sa_band_lock"]
             elif method == "nwinfo_set_lte_ext_band":
                 LOCK["lte"] = args["lte_band_lock"]
             elif method == "nwinfo_lock_nr_cell":
-                LOCK["nr_cell"] = args["lock_nr_cell"]
+                LOCK["nr_cell"] = f'{args["lock_nr_pci"]},{args["lock_nr_earfcn"]},{args["lock_nr_cell_band"]}'
+            elif method == "nwinfo_lock_lte_cell":
+                LOCK["lte_cell"] = f'{args["lock_lte_pci"]},{args["lock_lte_earfcn"]}'
             STATE["reg_until"] = time.time() + 4
             print(method, "->", args, "| Sperre jetzt", LOCK, flush=True)
             return {"result": [0, {"result": "success"}]}
