@@ -4,7 +4,7 @@ Zeichnet Signalqualität (RSRP, RSRQ, SINR, RSSI, Band, Zelle, Trägeraggregatio
 des ZTE G5TS / MC8830 (Aldi Talk) in SQLite auf und zeigt alles in einem Dashboard.
 Nur Python-Standardbibliothek, keine Abhängigkeiten.
 
-Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **SMS** · **Setup** (Router-Standort finden) · **Einstellungen**.
+Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **Zellen & Bänder** (Rangliste, Band-/Zellsperre) · **SMS** · **Setup** (Router-Standort finden) · **Einstellungen**.
 
 ![Dashboard mit Signalstärke, Signalwerten und Latenz](docs/dashboard.png)
 
@@ -20,6 +20,10 @@ Seiten: **Dashboard** · **Auswertung** (nach Tageszeit) · **SMS** · **Setup**
 **Auswertung nach Tageszeit** (Verlauf je Stunde und Heatmap Wochentag × Stunde):
 
 ![Auswertung nach Tageszeit](docs/auswertung.png)
+
+**Zellen & Bänder** – welche Zelle war wie gut, und Router auf Bänder oder eine Zelle festlegen:
+
+![Zellen und Bänder mit Rangliste und Sperre](docs/zellen.png)
 
 **Setup** – den besten Router-Standort finden (Bewertung in Worten, optional mit Ton):
 
@@ -143,6 +147,36 @@ rot hinterlegte Bänder, Neustarts als Raute in allen Zeitdiagrammen und in der 
 Aus den dauerhaften Stundenwerten: Verlauf je Stunde (0–23 Uhr) und Heatmap Wochentag × Stunde für Signal (RSRP, SINR, RSRQ),
 Durchsatz/Verbrauch, Latenz, Paketverlust und Ausfälle, dazu beste/schlechteste Stunde. Zeigt z. B., ob abends die Zelle überlastet ist.
 
+## Zellen & Bänder – Rangliste und Band-/Zellsperre
+
+Die Seite **Zellen & Bänder** zeigt für einen wählbaren Zeitraum (24 Std bis „Alles“):
+
+- **Aktuelle Verbindung** mit Bewertung und Platz in der Rangliste.
+- **Rangliste der Zellen** (Band · PCI · ARFCN): Anteil der Zeit, Ø RSRP/SINR/RSRQ, Bewertung (gleiche Formel wie auf der Setup-Seite),
+  Stabilität, in der Zelle übertragene Daten und die höchste gemessene Download-Rate („Spitze“).
+- **Zeitleiste**: je Zelle eine Spur, farbige Abschnitte = Zeit, in der die Zelle aktiv war; Rauten markieren Änderungen an der Sperre.
+- **Bänder im Vergleich** und **Zellen in Reichweite** (aktive Zellen, Zusatzträger und Nachbarzellen aus `nr_neighbor_cell`).
+  Für Nachbarzellen liefert der Router keine Signalwerte – eine Bewertung gibt es erst, wenn die Zelle einmal aktiv war.
+
+Die Werte je Zelle werden als Stundenwerte dauerhaft gespeichert (`cells_h`), der Datenverbrauch wird der jeweils aktiven Zelle zugeordnet.
+Beim ersten Start mit dieser Version werden vorhandene Daten automatisch übernommen.
+
+### Sperre setzen
+
+Unter **Band- und Zellsperre**: **Automatik** · **5G-Bänder** (SA) · **LTE-Bänder** · **5G-Zelle** (PCI + ARFCN, Band und SCS werden abgeleitet).
+In der Rangliste und der Nachbarliste setzt „Sperren“ die Zelle direkt ins Formular. Braucht das Router-Passwort.
+
+- Die Befehle stecken in der Firmware (`zte_nwinfo_api`: `nwinfo_set_sa_bandlock`, `nwinfo_lock_nr_cell`, `nwinfo_set_lte_ext_band`,
+  `nwinfo_reset_band_cell_setting`), die Router-Oberfläche zeigt sie aber nicht an. Die Argumentnamen fragt das Dashboard per ubus `list` ab;
+  liefert der Router keine Liste, werden bekannte Schreibweisen probiert. **Jede Änderung wird danach über `nwinfo_get_netinfo` geprüft** –
+  erst eine sichtbare Änderung gilt als übernommen.
+- **Sicherheitsnetz:** Findet der Router mit der Sperre länger kein Netz (einstellbar 1–10 min, Standard 3 min), stellt das Dashboard
+  automatisch auf Automatik zurück und trägt das in die Ereignisse ein.
+- Beim Umschalten ist die Verbindung kurz (ca. 10–60 s) weg.
+- **Noch nicht an einem echten G5TS geprüft** (nur mit dem Mock-Router). Vor dem ersten Einsatz einmal
+  `python zte_dash.py --probe-lock` ausführen – das ändert nichts, zeigt aber die Sperr-Befehle samt Argumenten und den aktuellen Zustand.
+  Dieselbe Abfrage gibt es auf der Seite unter „Schnittstelle prüfen“.
+
 ## Setup – besten Router-Standort finden
 
 Die Seite liest das Signal hochfrequent (0,5–5 s wählbar; die Signalwerte kommen ohne Router-Login) und bewertet es in Worten:
@@ -229,6 +263,7 @@ Export: `/api/export.csv?range=30d&kind=signal|ping` (auch mit `from`/`to`; Link
 
     python3 zte_dash.py --probe
     python3 zte_dash.py --probe-sms     # SMS-Schnittstelle des Routers
+    python3 zte_dash.py --probe-lock    # Band-/Zellsperre: Befehle, Argumente, aktueller Zustand (ändert nichts)
     python3 zte_dash.py --test-sms +491701234567   # EINE Test-SMS senden und zeigen, welche Schreibweise der Router akzeptiert
 
 Loggt sich ein und listet, was der Router liefert (Antwort von `get_wwandst`, verfügbare ubus-Objekte).
@@ -238,4 +273,5 @@ Wenn der Datenverbrauch leer bleibt: Ausgabe von `--probe` schicken, dann lässt
 
     python3 dev/mock_router.py --seed data/demo.db --days 60     # 60 Tage Demo-Daten (inkl. Ausfälle)
     python3 dev/mock_router.py --port 9999 &                     # Fake-Router (Passwort: demo)
+    curl http://127.0.0.1:9999/mock/locksig?on=1                 # optional: Mock meldet die Sperr-Befehle per ubus list
     ZTE_HOST=http://127.0.0.1:9999 ZTE_PASSWORD=demo ZTE_DB=data/demo.db python3 zte_dash.py

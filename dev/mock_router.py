@@ -49,6 +49,15 @@ def init_counters():
     COUNTERS.update(rx_m=rx, tx_m=tx, day_rx=drx, day_tx=dtx, last=now)
 
 
+SA_ALL = "1,3,8,28,41,77,78,7,20,38,40,75"
+LTE_ALL = "0x7a0880800c5"
+LOCK = {"sa": SA_ALL, "lte": LTE_ALL, "nr_cell": ""}
+# Zellen, die der Mock als aktive Zelle kennt: (pci, arfcn) -> (band, bandbreite, RSRP-Versatz)
+MOCK_CELLS = {(768, 641760): ("n78", 90, 0), (115, 641760): ("n78", 90, -4), (970, 641760): ("n78", 90, -9),
+              (870, 431070): ("n1", 20, -9)}
+LOCK_SIG = {"nwinfo_set_sa_bandlock": {"nr5g_sa_band_lock": "String"}, "nwinfo_lock_nr_cell": {"lock_nr_cell": "String"},
+            "nwinfo_set_lte_ext_band": {"lte_band_lock": "String"}, "nwinfo_reset_band_cell_setting": {},
+            "nwinfo_get_netinfo": {}, "nwinfo_set_netselect": {"net_select": "String"}}
 STATE = {"fail": 0, "select": "4G_AND_5G", "reg_until": 0.0, "log": [], "sms_fail": False}
 SMS = []               # Nachrichtenspeicher des Mock-Routers (wie zwrt_wms: tag 0 gelesen, 1 ungelesen, 2 gesendet, 3 fehlgeschlagen)
 SMS_NEXT = [1]
@@ -152,7 +161,7 @@ def sms_seed():
 sms_seed()
 
 
-def profile(t):
+def profile(t, live=False):
     """Gemeinsames Modell für Live- und Demo-Werte. t = Unix-Zeit."""
     h = (t % 86400) / 3600.0
     day = math.sin((h - 9) / 24 * 2 * math.pi)                # Tageszyklus (Netzlast/Wetter)
@@ -161,12 +170,33 @@ def profile(t):
     rsrp = -97 + 4 * slow + 2 * day + r.gauss(0, 1.6)
     band, pci, arfcn, bw, net = "n78", 768, 641760, 90, "SA"
     seg = int(t // 5400) % 11                                  # gelegentlich Zellwechsel
+    if seg == 3:
+        pci, rsrp = 115, rsrp - 4
     if seg == 7:
         band, pci, arfcn, bw, rsrp = "n1", 870, 431070, 20, rsrp - 9
     lte = None
     if seg == 9:
         net, band, rsrp = "LTE", "B3", None
         lte = -99 + 4 * slow + r.gauss(0, 1.8)
+    if live and (LOCK["nr_cell"] or LOCK["sa"] != SA_ALL):   # Sperre (nur im Live-Mock, nicht in den Demodaten)
+        want = None
+        if LOCK["nr_cell"]:
+            f = LOCK["nr_cell"].split(",")
+            want = MOCK_CELLS.get((int(f[0]), int(f[1])))
+            if not want:                                       # Zelle gibt es hier nicht -> kein Netz
+                return {"net": "", "band": "", "pci": None, "arfcn": None, "bw": None, "rsrp": None, "lte": None,
+                        "snr": 0, "rsrq": 0, "rssi": 0, "dl": 0, "ul": 0}
+        else:
+            allowed = {int(x) for x in LOCK["sa"].split(",") if x}
+            cands = [(k, v) for k, v in MOCK_CELLS.items() if int(v[0][1:]) in allowed]
+            want = cands[0][1] if cands else None
+            if not want:
+                net, band, rsrp, lte = "LTE", "B3", None, -99 + 4 * slow + r.gauss(0, 1.8)
+        if want:
+            net, lte = "SA", None
+            band, bw, off = want
+            pci, arfcn = [k for k, v in MOCK_CELLS.items() if v is want][0]
+            rsrp = -97 + 4 * slow + 2 * day + r.gauss(0, 1.6) + off
     p = rsrp if rsrp is not None else lte
     snr = max(-4, min(28, 6.5 + (p + 102) * 0.9 + r.gauss(0, 1.2)))
     rsrq = max(-19, min(-6, -11 + (p + 100) * 0.12 + r.gauss(0, 0.7)))
@@ -181,11 +211,11 @@ def profile(t):
             "snr": snr, "rsrq": rsrq, "rssi": rssi, "dl": dl, "ul": ul}
 
 
-def netinfo(t):
-    p = profile(t)
+def netinfo(t, live=False):
+    p = profile(t, live)
     nr = p["rsrp"] is not None
     ca = "1, 870,2,1,431070,20,0,-104.0,-12.0,4.5,-95.0;" if p["net"] == "SA" and p["band"] == "n78" else ""
-    return {"network_type": p["net"], "signalbar": "4" if (p["rsrp"] or p["lte"]) > -100 else "3",
+    return {"network_type": p["net"], "signalbar": "0" if (p["rsrp"] or p["lte"]) is None else "4" if (p["rsrp"] or p["lte"]) > -100 else "3",
             "network_provider_fullname": "Telekom.de", "wan_active_band": p["band"],
             "nr5g_cell_id": "21253422848", "nr5g_pci": str(p["pci"]) if nr else "0",
             "nr5g_action_channel": str(p["arfcn"]) if nr else "0", "nr5g_action_band": p["band"] if nr else "",
@@ -193,7 +223,11 @@ def netinfo(t):
             "nr5g_rsrp": f"{p['rsrp']:.0f}" if nr else "0", "nr5g_rsrq": f"{p['rsrq']:.0f}" if nr else "0",
             "nr5g_snr": f"{p['snr']:.1f}" if nr else "0", "nr5g_rssi": f"{p['rssi']:.0f}" if nr else "0",
             "lte_rsrp": f"{p['lte']:.0f}" if p["lte"] else "0", "lte_rsrq": f"{p['rsrq']:.0f}" if p["lte"] else "0",
-            "lte_snr": f"{p['snr']:.1f}" if p["lte"] else "0", "lte_rssi": f"{p['rssi']:.0f}" if p["lte"] else "0"}
+            "lte_snr": f"{p['snr']:.1f}" if p["lte"] else "0", "lte_rssi": f"{p['rssi']:.0f}" if p["lte"] else "0",
+            "nr_neighbor_cell": "768,641760;115,641760;970,641760;513,641760;381,641760;870,431070;153,641760;" if nr else "",
+            "lte_neighbor_cell": "", "lte_band": "1,3,7,8,20,28,32,38,40,41,42,43",
+            "nr5g_sa_band_lock": LOCK["sa"], "nr5g_nsa_band_lock": "", "nr5g_nrdc_band_lock": "",
+            "lte_band_lock": LOCK["lte"], "gw_band_lock": "0x000000000", "lock_nr_cell": LOCK["nr_cell"], "lock_lte_cell": ""}
 
 
 def wwandst(now):
@@ -227,6 +261,9 @@ class Handler(BaseHTTPRequestHandler):
         elif u.path == "/mock/enc":          # Verschlüsselung der SMS-Felder an/aus (Firmware ohne Verschlüsselung)
             STATE["enc"] = q.get("on", ["1"])[0] == "1"
             msg = "ok"
+        elif u.path == "/mock/locksig":       # Methodenliste (ubus list) für zte_nwinfo_api an/aus
+            STATE["locksig"] = q.get("on", ["1"])[0] == "1"
+            msg = "ok"
         elif u.path == "/mock/smsfail":
             STATE["sms_fail"] = q.get("on", ["1"])[0] == "1"
             msg = "ok"
@@ -243,8 +280,10 @@ class Handler(BaseHTTPRequestHandler):
         out = []
         for req in body if isinstance(body, list) else [body]:
             if req.get("method") == "list":
-                sig = {}
-                out.append({"jsonrpc": "2.0", "id": req.get("id"), "result": {"zwrt_wms": sig}})
+                params = req.get("params") or []
+                obj = next((x for x in params if x in ("zte_nwinfo_api", "zwrt_wms")), "zwrt_wms")
+                sig = LOCK_SIG if obj == "zte_nwinfo_api" and STATE.get("locksig") else {}
+                out.append({"jsonrpc": "2.0", "id": req.get("id"), "result": {obj: sig}})
                 continue
             sid, obj, method, args = (req.get("params") + [{}])[:4]
             out.append({"jsonrpc": "2.0", "id": req.get("id"), **self.dispatch(sid, obj, method, args or {})})
@@ -286,7 +325,7 @@ class Handler(BaseHTTPRequestHandler):
             print("web_http_enstr_set -> Schlüssel gesetzt", flush=True)
             return {"result": [0, {"result": "0"}]}
         if (obj, method) == ("zte_nwinfo_api", "nwinfo_get_netinfo"):
-            d = netinfo(time.time())
+            d = netinfo(time.time(), live=True)
             d["net_select"] = STATE["select"]
             if time.time() < STATE["reg_until"]:       # Modem meldet sich gerade neu an
                 d.update(network_type="", nr5g_rsrp="0", lte_rsrp="0")
@@ -301,6 +340,24 @@ class Handler(BaseHTTPRequestHandler):
             STATE["log"].append(STATE["select"])
             print("set_netselect ->", STATE["select"], flush=True)
             return {"result": [0, {}]}
+        if obj == "zte_nwinfo_api" and method in LOCK_SIG and method not in ("nwinfo_get_netinfo", "nwinfo_set_netselect"):
+            if not authed:
+                return denied
+            want = set(LOCK_SIG[method])
+            if set(args) != want and not (method == "nwinfo_reset_band_cell_setting" and not args):
+                print(method, "-> INVALID ARGUMENT", args, flush=True)
+                return {"result": [2]}
+            if method == "nwinfo_reset_band_cell_setting":
+                LOCK.update(sa=SA_ALL, lte=LTE_ALL, nr_cell="")
+            elif method == "nwinfo_set_sa_bandlock":
+                LOCK["sa"] = args["nr5g_sa_band_lock"]
+            elif method == "nwinfo_set_lte_ext_band":
+                LOCK["lte"] = args["lte_band_lock"]
+            elif method == "nwinfo_lock_nr_cell":
+                LOCK["nr_cell"] = args["lock_nr_cell"]
+            STATE["reg_until"] = time.time() + 4
+            print(method, "->", args, "| Sperre jetzt", LOCK, flush=True)
+            return {"result": [0, {"result": "success"}]}
         if (obj, method) == ("zwrt_data", "get_wwandst"):
             if not authed:
                 return denied
@@ -361,7 +418,7 @@ def seed(db_path, days, step=60):
     from datetime import datetime
     z.init_db(db_path)
     conn = z.connect(db_path)
-    for t in ("samples", "traffic", "daily", "events", "pings", "outages", "samples_h", "traffic_h", "pings_h"):
+    for t in ("samples", "traffic", "daily", "events", "pings", "outages", "samples_h", "traffic_h", "pings_h", "cells_h", "cells_seen"):
         conn.execute(f"DELETE FROM {t}")
     now = int(time.time())
     start = now - days * 86400
@@ -381,7 +438,7 @@ def seed(db_path, days, step=60):
             cur_month, rx_m, tx_m = mk, 0, 0
         rx_m += rx_d
         tx_m += tx_d
-        rows_t.append((ts, rx_m, tx_m, rx_m, tx_m, p["dl"], p["ul"], rx_d, tx_d))
+        rows_t.append((ts, rx_m, tx_m, rx_m, tx_m, p["dl"], p["ul"], rx_d, tx_d, z.sample_key(s)))
         day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
         a = daily.setdefault(day, [0, 0])
         a[0] += rx_d
@@ -395,7 +452,12 @@ def seed(db_path, days, step=60):
         last_cfg = key
     cols = list(z.parse_sample(now, netinfo(now)))
     conn.executemany(f"INSERT INTO samples({','.join(cols)}) VALUES({','.join('?' * len(cols))})", rows_s)
-    conn.executemany("INSERT INTO traffic VALUES(?,?,?,?,?,?,?,?,?)", rows_t)
+    conn.executemany("INSERT INTO traffic(ts,rx_total,tx_total,rx_month,tx_month,rx_speed,tx_speed,rx_delta,tx_delta,cell) "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?)", rows_t)
+    for (pci, arfcn), role in (((768, 641760), "serving"), ((115, 641760), "serving"), ((870, 431070), "serving"),
+                               ((970, 641760), "neighbor"), ((513, 641760), "neighbor"), ((381, 641760), "neighbor"),
+                               ((153, 641760), "neighbor")):
+        conn.execute("INSERT OR REPLACE INTO cells_seen VALUES('NR',?,?,?,?,?,?)", (pci, arfcn, role, start, now - 60, 500))
     conn.executemany("INSERT INTO daily VALUES(?,?,?)", [(k, v[0], v[1]) for k, v in daily.items()])
     # Ping-Demo: 4 Ziele, Ausfälle mit Watchdog-Neustart
     targets = {"1.1.1.1": 27, "8.8.8.8": 31, "google.com": 34, "cloudflare.com": 29}

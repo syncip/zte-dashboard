@@ -12,6 +12,7 @@ Start:            python3 zte_dash.py
 Diagnose:         python3 zte_dash.py --probe
 Einzelabruf:      python3 zte_dash.py --once
 Reconnect testen: python3 zte_dash.py --test-reconnect
+Band-/Zellsperre: python3 zte_dash.py --probe-lock   (nur lesen)
 """
 import argparse
 import calendar
@@ -150,7 +151,23 @@ CREATE TABLE IF NOT EXISTS pings_h (
   ts INTEGER NOT NULL, target TEXT NOT NULL, n INTEGER, lost INTEGER,
   rtt_n INTEGER, rtt_sum REAL, rtt_sq REAL, rtt_min REAL, rtt_max REAL, PRIMARY KEY (ts, target)
 );
+-- Zellen & Bänder: Stundenwerte je Funkzelle (Schlüssel 'NR|n78|768|641760'), dauerhaft
+CREATE TABLE IF NOT EXISTS cells_h (
+  ts INTEGER NOT NULL, ckey TEXT NOT NULL, rat TEXT, band TEXT, pci INTEGER, arfcn INTEGER, bw INTEGER, n INTEGER,
+  rsrp REAL, rsrp_min REAL, rsrp_max REAL, rsrp_sq REAL, rsrq REAL,
+  snr REAL, snr_min REAL, snr_max REAL, snr_sq REAL, rssi REAL,
+  rx INTEGER NOT NULL DEFAULT 0, tx INTEGER NOT NULL DEFAULT 0, rx_max REAL,
+  PRIMARY KEY (ts, ckey)
+);
+-- Alle Zellen, die der Router als aktive Zelle, Zusatzträger oder Nachbarzelle gemeldet hat
+CREATE TABLE IF NOT EXISTS cells_seen (
+  rat TEXT NOT NULL, pci INTEGER NOT NULL, arfcn INTEGER NOT NULL, role TEXT,
+  first_seen INTEGER, last_seen INTEGER, n INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (rat, pci, arfcn)
+);
 """
+# Zellschlüssel aus einer Zeile der Tabelle samples (gleiches Format wie cell_key())
+CKEY_SQL = ("(CASE WHEN nr_rsrp IS NOT NULL THEN 'NR' ELSE 'LTE' END)||'|'||COALESCE(band,'')||'|'||"
+            "COALESCE(pci,'')||'|'||COALESCE(arfcn,'')")
 
 
 def connect(path):
@@ -164,6 +181,12 @@ def init_db(path):
     conn = connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(traffic)")}
+    if "cell" not in cols:
+        # Neu: Datenverbrauch je Funkzelle. Vorhandene Einträge bekommen die Zelle der letzten Signalmessung davor.
+        conn.execute("ALTER TABLE traffic ADD COLUMN cell TEXT")
+        conn.execute(f"""UPDATE traffic SET cell = (SELECT {CKEY_SQL} FROM samples s WHERE s.ts <= traffic.ts
+                         AND s.ts >= traffic.ts - 300 AND COALESCE(s.nr_rsrp, s.lte_rsrp) IS NOT NULL ORDER BY s.ts DESC LIMIT 1)""")
     conn.commit()
     conn.close()
 
@@ -210,6 +233,25 @@ def rollup(conn, since_ts):
         SELECT (ts/{HOUR})*{HOUR}, target, COUNT(*), SUM(CASE WHEN rtt IS NULL THEN 1 ELSE 0 END),
                COUNT(rtt), COALESCE(SUM(rtt),0), COALESCE(SUM(rtt*rtt),0), MIN(rtt), MAX(rtt)
         FROM pings WHERE ts >= ? GROUP BY 1, 2""", (since,))
+    # Zellen: Signal je Zelle und Stunde, dazu der in dieser Zelle übertragene Datenverbrauch
+    conn.execute(f"""
+        INSERT OR REPLACE INTO cells_h(ts,ckey,rat,band,pci,arfcn,bw,n,rsrp,rsrp_min,rsrp_max,rsrp_sq,rsrq,
+                                       snr,snr_min,snr_max,snr_sq,rssi,rx,tx,rx_max)
+        SELECT (ts/{HOUR})*{HOUR} h, k, rat, band, pci, arfcn, MAX(bw), COUNT(*), AVG(p), MIN(p), MAX(p), AVG(p*p), AVG(q),
+               AVG(s), MIN(s), MAX(s), AVG(s*s), AVG(r), 0, 0, NULL
+        FROM (SELECT ts, {CKEY_SQL} k, CASE WHEN nr_rsrp IS NOT NULL THEN 'NR' ELSE 'LTE' END rat, band, pci, arfcn, bw,
+                     COALESCE(nr_rsrp, lte_rsrp) p,
+                     CASE WHEN nr_rsrp IS NOT NULL THEN nr_rsrq ELSE lte_rsrq END q,
+                     CASE WHEN nr_rsrp IS NOT NULL THEN nr_snr ELSE lte_snr END s,
+                     CASE WHEN nr_rsrp IS NOT NULL THEN nr_rssi ELSE lte_rssi END r
+              FROM samples WHERE ts >= ? AND COALESCE(nr_rsrp, lte_rsrp) IS NOT NULL)
+        GROUP BY h, k""", (since,))
+    conn.execute(f"""
+        UPDATE cells_h SET
+          rx = COALESCE((SELECT SUM(rx_delta) FROM traffic t WHERE t.cell = cells_h.ckey AND t.ts >= cells_h.ts AND t.ts < cells_h.ts + {HOUR}), 0),
+          tx = COALESCE((SELECT SUM(tx_delta) FROM traffic t WHERE t.cell = cells_h.ckey AND t.ts >= cells_h.ts AND t.ts < cells_h.ts + {HOUR}), 0),
+          rx_max = (SELECT MAX(rx_speed) FROM traffic t WHERE t.cell = cells_h.ckey AND t.ts >= cells_h.ts AND t.ts < cells_h.ts + {HOUR})
+        WHERE ts >= ?""", (since,))
 
 
 # --------------------------------------------------------------------------- #
@@ -947,6 +989,162 @@ class Router:
                 found = res
         return found or {}
 
+    # -- Band- und Zellsperre (zte_nwinfo_api) -------------------------------------------- #
+    # Die Weboberfläche des G5TS enthält diese Aufrufe, zeigt sie aber nicht an. Die genauen Argumentnamen sind nicht
+    # dokumentiert: Sie werden per ubus 'list' erfragt; sonst werden bekannte Schreibweisen nacheinander probiert.
+    # Jede Änderung wird danach über nwinfo_get_netinfo geprüft - erst eine sichtbare Änderung gilt als Erfolg.
+    LOCK_OBJ = "zte_nwinfo_api"
+    LOCK_METHODS = {"reset": "nwinfo_reset_band_cell_setting", "sa_bands": "nwinfo_set_sa_bandlock",
+                    "nr_cell": "nwinfo_lock_nr_cell", "lte_bands": "nwinfo_set_lte_ext_band"}
+
+    def lock_signature(self, refresh=False):
+        """{methode: {argument: typ}} von zte_nwinfo_api (braucht den Login). Leeres dict = Router verrät es nicht."""
+        with self.lock:
+            if getattr(self, "_lock_sig", None) is not None and not refresh:
+                return self._lock_sig
+            if not self.sid:
+                self.login()
+            sig = self.list_methods(self.LOCK_OBJ)
+            self._lock_sig = {k: v for k, v in sig.items() if isinstance(v, dict)} if isinstance(sig, dict) else {}
+            return self._lock_sig
+
+    @staticmethod
+    def _arg_for(names, *words):
+        for n in names:
+            low = n.lower()
+            if any(w in low for w in words):
+                return n
+        return None
+
+    def _lock_variants(self, kind, p):
+        """Argumentsätze für eine Sperre, wahrscheinlichster zuerst."""
+        try:
+            sig = self.lock_signature()
+        except RouterError:
+            sig = {}
+        names = list((sig.get(self.LOCK_METHODS[kind]) or {}).keys())
+        out = []
+        if kind == "reset":
+            out = [{}]
+            if names:
+                out.append({n: 1 for n in names})
+        elif kind == "sa_bands":
+            val = ",".join(str(b) for b in p["bands"])
+            if len(names) == 1:
+                out.append({names[0]: val})
+            out += [{"nr5g_sa_band_lock": val}, {"nr5g_band_mask": val}, {"sa_band_lock": val}, {"band": val}]
+        elif kind == "lte_bands":
+            mask = lte_bands_mask(p["bands"])
+            if len(names) == 1:
+                out.append({names[0]: mask})
+            out += [{"lte_band_lock": mask}, {"lte_band_lock": mask, "gw_band_lock": "0x000000000"},
+                    {"lte_band_lock": mask.upper().replace("0X", "0x")}]
+        elif kind == "nr_cell":
+            pci, arfcn, band, scs = p["pci"], p["arfcn"], p["band"], p["scs"]
+            s4 = f"{pci},{arfcn},{band},{scs}"
+            if len(names) == 1:
+                out.append({names[0]: s4})
+            elif len(names) > 1:
+                m = {}
+                for n in names:
+                    low = n.lower()
+                    if "pci" in low:
+                        m[n] = str(pci)
+                    elif "arfcn" in low or "earfcn" in low or "freq" in low or "channel" in low:
+                        m[n] = str(arfcn)
+                    elif "scs" in low:
+                        m[n] = str(scs)
+                    elif "band" in low:
+                        m[n] = str(band)
+                if len(m) == len(names):
+                    out.append(m)
+            out += [{"lock_nr_cell": s4}, {"nr5g_cell_lock": s4}, {"lock_nr_cell": f"{pci},{arfcn},{scs},{band}"},
+                    {"lock_nr_pci": str(pci), "lock_nr_earfcn": str(arfcn), "lock_nr_band": str(band), "lock_nr_scs": str(scs)}]
+        uniq = []
+        for v in out:
+            if v not in uniq:
+                uniq.append(v)
+        return uniq
+
+    @staticmethod
+    def lock_applied(kind, p, d):
+        """Hat der Router die Sperre übernommen? (Prüfung über nwinfo_get_netinfo)"""
+        if kind == "reset":
+            st = lock_state(d, p.get("sa_supported"))
+            return st["mode"] == "auto"
+        if kind == "sa_bands":
+            return set(parse_band_list(d.get("nr5g_sa_band_lock"))) == set(p["bands"])
+        if kind == "lte_bands":
+            return set(lte_mask_bands(d.get("lte_band_lock"))) == set(p["bands"])
+        if kind == "nr_cell":
+            c = parse_cell_lock(d.get("lock_nr_cell"))
+            return bool(c) and str(p["pci"]) in c["parts"] and str(p["arfcn"]) in c["parts"]
+        return False
+
+    def apply_lock(self, kind, p, say=None):
+        """Sperre setzen/aufheben. Nur 'ubus-Status 2' (ungültige Argumente) oder eine Antwort ohne sichtbare Änderung führen
+        zur nächsten Schreibweise. Rückgabe: {"ok", "detail", "args", "steps"}"""
+        say = say or (lambda m: log.info("%s", m))
+        steps = []
+        method = self.LOCK_METHODS[kind]
+        cache = getattr(self, "_lock_ok", {})
+        variants = self._lock_variants(kind, p)
+        if kind in cache and cache[kind] in [sorted(v) for v in variants]:
+            variants.sort(key=lambda v: sorted(v) != cache[kind])
+        with self.lock:
+            for i, args in enumerate(variants):
+                shown = json.dumps(args, ensure_ascii=False)
+                try:
+                    self.call_auth(self.LOCK_OBJ, method, args)
+                except RouterError as exc:
+                    txt = str(exc)
+                    if "ubus-Status 2" in txt:
+                        steps.append({"ok": False, "text": f"{method} {shown}: vom Router abgelehnt (ungültige Argumente)"})
+                        continue
+                    if "not found" in txt.lower() or "-32601" in txt or "-32000" in txt:
+                        steps.append({"ok": False, "text": f"{method}: gibt es auf diesem Router nicht ({txt})"})
+                        break
+                    steps.append({"ok": False, "text": f"{method} {shown}: {txt}"})
+                    return {"ok": False, "detail": txt, "args": None, "steps": steps}
+                say(f"{method} {shown} angenommen - prüfe …")
+                ok = False
+                for _ in range(6):
+                    time.sleep(1.5)
+                    try:
+                        if self.lock_applied(kind, p, self.netinfo()):
+                            ok = True
+                            break
+                    except RouterError:
+                        pass
+                if ok:
+                    steps.append({"ok": True, "text": f"{method} {shown}: übernommen"})
+                    cache[kind] = sorted(args)
+                    self._lock_ok = cache
+                    return {"ok": True, "detail": "vom Router übernommen", "args": args, "steps": steps}
+                steps.append({"ok": False, "text": f"{method} {shown}: angenommen, aber keine Änderung sichtbar"})
+        return {"ok": False, "args": None, "steps": steps,
+                "detail": "Der Router hat keine der bekannten Schreibweisen übernommen. Bitte 'python zte_dash.py --probe-lock' "
+                          "ausführen und die Ausgabe schicken."}
+
+    def reset_locks(self, sa_supported=None, lte_supported=None, say=None):
+        """Alles auf Automatik. Erst der Reset-Befehl des Routers, sonst alle Bänder einzeln wieder freigeben."""
+        p = {"sa_supported": sa_supported}
+        res = self.apply_lock("reset", p, say)
+        if res["ok"]:
+            return res
+        steps = res["steps"]
+        d = self.netinfo()
+        st = lock_state(d, sa_supported, lte_supported)
+        if st["sa_locked"]:
+            r = self.apply_lock("sa_bands", {"bands": st["sa_supported"]}, say)
+            steps += r["steps"]
+        if st["lte_locked"]:
+            r = self.apply_lock("lte_bands", {"bands": st["lte_supported"]}, say)
+            steps += r["steps"]
+        ok = lock_state(self.netinfo(), sa_supported, lte_supported)["mode"] == "auto"
+        return {"ok": ok, "steps": steps, "args": None,
+                "detail": "Automatik wiederhergestellt" if ok else "Automatik konnte nicht vollständig wiederhergestellt werden"}
+
     # -- SMS (ubus-Objekt zwrt_wms) ---------------------------------------------------- #
     # Neuere Firmware verschlüsselt Rufnummer und Text (AES-256-GCM). Ablauf wie in der Weboberfläche:
     # 1. Öffentlichen RSA-Schlüssel holen (web_crt_get), 2. zufälligen 32-Byte-Schlüssel erzeugen und RSA-verschlüsselt
@@ -1244,6 +1442,149 @@ def counter_delta(cur, prev):
 
 
 # --------------------------------------------------------------------------- #
+# Zellen & Bänder: Kanal -> Band, Nachbarzellen, Sperr-Zustand des Routers
+# --------------------------------------------------------------------------- #
+# Downlink-Bereiche (MHz) der in Deutschland genutzten NR-Bänder; bei Überschneidungen gewinnt der erste Eintrag
+NR_BANDS_DL = [("n78", 3300, 3800), ("n77", 3300, 4200), ("n1", 2110, 2170), ("n3", 1805, 1880), ("n7", 2620, 2690),
+               ("n38", 2570, 2620), ("n41", 2496, 2690), ("n40", 2300, 2400), ("n8", 925, 960), ("n20", 791, 821),
+               ("n28", 758, 803), ("n75", 1432, 1517), ("n32", 1452, 1496)]
+# LTE: EARFCN-Bereiche im Downlink
+LTE_BANDS_EARFCN = [(1, 0, 599), (3, 1200, 1949), (7, 2750, 3449), (8, 3450, 3799), (20, 6150, 6449), (28, 9210, 9659),
+                    (32, 9920, 10359), (38, 37750, 38249), (40, 38650, 39649), (41, 39650, 41589), (42, 41590, 43589),
+                    (43, 43590, 45589)]
+TDD_NR = {38, 40, 41, 77, 78, 79}
+# Bänder, die der G5TS für 5G SA meldet, wenn nichts gesperrt ist (ergänzt um alles, was der Router später meldet)
+SA_BANDS_DEFAULT = [1, 3, 7, 8, 20, 28, 38, 40, 41, 75, 77, 78]
+LTE_BANDS_DEFAULT = [1, 3, 7, 8, 20, 28, 32, 38, 40, 41, 42, 43]
+
+
+def cell_key(rat, band, pci, arfcn):
+    return f"{rat}|{band or ''}|{'' if pci is None else pci}|{'' if arfcn is None else arfcn}"
+
+
+def sample_key(s):
+    """Zellschlüssel einer Messung (wie CKEY_SQL). None = kein Netz."""
+    if s.get("nr_rsrp") is not None:
+        return cell_key("NR", s.get("band"), s.get("pci"), s.get("arfcn"))
+    if s.get("lte_rsrp") is not None:
+        return cell_key("LTE", s.get("band"), s.get("pci"), s.get("arfcn"))
+    return None
+
+
+def nr_freq(arfcn):
+    """NR-ARFCN -> Frequenz in MHz (3GPP TS 38.104)."""
+    n = int(arfcn)
+    if n < 600000:
+        return n * 0.005
+    if n < 2016667:
+        return 3000 + (n - 600000) * 0.015
+    return 24250.08 + (n - 2016667) * 0.06
+
+
+def nr_band_of(arfcn):
+    try:
+        f = nr_freq(arfcn)
+    except (TypeError, ValueError):
+        return None
+    for name, lo, hi in NR_BANDS_DL:
+        if lo <= f <= hi:
+            return name
+    return None
+
+
+def lte_band_of(earfcn):
+    try:
+        e = int(earfcn)
+    except (TypeError, ValueError):
+        return None
+    for b, lo, hi in LTE_BANDS_EARFCN:
+        if lo <= e <= hi:
+            return f"B{b}"
+    return None
+
+
+def band_num(band):
+    m = re.search(r"(\d+)", str(band or ""))
+    return int(m.group(1)) if m else None
+
+
+def default_scs(band):
+    """Unterträgerabstand in kHz: TDD-Bänder (n78 …) 30 kHz, FDD-Bänder 15 kHz."""
+    return 30 if band_num(band) in TDD_NR else 15
+
+
+def parse_neighbors(raw):
+    """'768,641760;115,641760;' -> [(768, 641760), (115, 641760)]"""
+    out = []
+    for part in str(raw or "").split(";"):
+        f = [x.strip() for x in part.split(",")]
+        if len(f) >= 2 and f[0].lstrip("-").isdigit() and f[1].isdigit():
+            pair = (int(f[0]), int(f[1]))
+            if pair not in out:
+                out.append(pair)
+    return out
+
+
+def parse_band_list(raw):
+    out = []
+    for x in re.split(r"[,;\s]+", str(raw or "")):
+        n = band_num(x)
+        if n is not None and 0 < n < 512 and n not in out:
+            out.append(n)
+    return out
+
+
+def lte_mask_bands(raw):
+    """LTE-Bandmaske des Routers ('0x7a0880800c5': Bit n-1 = Band n) -> Liste der Bänder."""
+    try:
+        v = int(str(raw).strip(), 16) if str(raw).strip().lower().startswith("0x") else int(str(raw).strip())
+    except (TypeError, ValueError):
+        return []
+    return [i + 1 for i in range(v.bit_length()) if v >> i & 1]
+
+
+def lte_bands_mask(bands):
+    v = 0
+    for b in bands:
+        v |= 1 << (int(b) - 1)
+    return hex(v)
+
+
+def parse_cell_lock(raw):
+    """Zellsperre aus netinfo ('pci,arfcn,band,scs' o. ä.). Leer, '0' oder nur Nullen = keine Sperre."""
+    s = str(raw or "").strip().strip(";")
+    nums = [x for x in re.split(r"[,;\s]+", s) if x]
+    if not nums or all(re.fullmatch(r"0+|-1", x) for x in nums):
+        return None
+    return {"raw": s, "parts": nums}
+
+
+def lock_state(d, sa_supported=None, lte_supported=None):
+    """Aktueller Sperr-Zustand aus nwinfo_get_netinfo."""
+    sa_sup = sorted(set(sa_supported or SA_BANDS_DEFAULT))
+    lte_sup = parse_band_list(d.get("lte_band")) or list(lte_supported or LTE_BANDS_DEFAULT)
+    sa = parse_band_list(d.get("nr5g_sa_band_lock"))
+    lte = lte_mask_bands(d.get("lte_band_lock")) if d.get("lte_band_lock") not in (None, "") else []
+    nr_cell, lte_cell = parse_cell_lock(d.get("lock_nr_cell")), parse_cell_lock(d.get("lock_lte_cell"))
+    sa_locked = bool(sa) and not set(sa_sup) <= set(sa)
+    lte_locked = bool(lte) and not set(lte_sup) <= set(lte)
+    parts = []
+    if nr_cell:
+        p = nr_cell["parts"]
+        parts.append(f"5G-Zelle PCI {p[0]}" + (f" / ARFCN {p[1]}" if len(p) > 1 else ""))
+    if lte_cell:
+        parts.append(f"LTE-Zelle {lte_cell['raw']}")
+    if sa_locked:
+        parts.append("5G-Bänder " + ", ".join(f"n{b}" for b in sa))
+    if lte_locked:
+        parts.append("LTE-Bänder " + ", ".join(f"B{b}" for b in lte))
+    return {"mode": "locked" if parts else "auto", "summary": " · ".join(parts) or "Automatik",
+            "sa_bands": sa, "sa_supported": sa_sup, "sa_locked": sa_locked,
+            "lte_bands": lte, "lte_supported": lte_sup, "lte_locked": lte_locked,
+            "nr_cell": nr_cell, "lte_cell": lte_cell, "net_select": d.get("net_select")}
+
+
+# --------------------------------------------------------------------------- #
 # SMS: Kodierung, Router-Schnittstelle (ubus zwrt_wms), Archiv, Abgleich, Versand
 # --------------------------------------------------------------------------- #
 # GSM-7-Zeichensatz (Standard + Erweiterungstabelle, die je 2 Zeichen belegt)
@@ -1409,6 +1750,10 @@ class Collector(threading.Thread):
         self._last_usage = 0.0
         self._last_signal = 0.0
         self._last_maint = 0.0
+        self.cur_cell = None             # Zellschlüssel der letzten Messung (für den Datenverbrauch je Zelle)
+        self.last_netinfo = None         # letzte Antwort von nwinfo_get_netinfo (Sperr-Zustand, Nachbarzellen)
+        self.last_netinfo_ts = None
+        self.lock_busy = threading.Lock()  # es läuft gerade eine Band-/Zellsperre oder deren Rücknahme
 
     def snapshot_status(self):
         with self.lock:
@@ -1495,7 +1840,85 @@ class Collector(threading.Thread):
             add_event(conn, ts, "cell", f"{pretty(p)} → {pretty([s['net_type'], s['band'], s['pci']])}")
         if s["net_type"]:
             kv_set(conn, "last_cfg", cfg_key)
+        self.cur_cell = sample_key(s)
+        self.last_netinfo, self.last_netinfo_ts = data, ts
+        try:
+            self._track_cells(conn, ts, s, data)
+            self._lock_guard(conn, ts, s)
+        except Exception:  # noqa: BLE001 - Zusatzfunktion darf die Messung nie stören
+            log.exception("Zellen/Sperre: Fehler bei der Auswertung")
         self._set(online=True, last_ok=ts, last_error=None)
+
+    def _track_cells(self, conn, ts, s, d):
+        """Aktive Zelle, Zusatzträger und Nachbarzellen in cells_seen fortschreiben; unterstützte Bänder merken."""
+        seen = []
+        if s["nr_rsrp"] is not None and s["pci"] is not None and s["arfcn"] is not None:
+            seen.append(("NR", s["pci"], s["arfcn"], "serving"))
+        for c in json.loads(s["ca"] or "[]"):
+            seen.append(("NR", c["pci"], c["arfcn"], "ca"))
+        for pci, arfcn in parse_neighbors(d.get("nr_neighbor_cell")):
+            seen.append(("NR", pci, arfcn, "neighbor"))
+        for pci, arfcn in parse_neighbors(d.get("lte_neighbor_cell")):
+            seen.append(("LTE", pci, arfcn, "neighbor"))
+        rank = {"serving": 0, "ca": 1, "neighbor": 2}
+        for rat, pci, arfcn, role in seen:
+            conn.execute("""INSERT INTO cells_seen(rat,pci,arfcn,role,first_seen,last_seen,n) VALUES(?,?,?,?,?,?,1)
+                            ON CONFLICT(rat,pci,arfcn) DO UPDATE SET last_seen=excluded.last_seen, n=n+1,
+                            role=CASE WHEN ? < (CASE role WHEN 'serving' THEN 0 WHEN 'ca' THEN 1 ELSE 2 END) THEN excluded.role ELSE role END""",
+                         (rat, pci, arfcn, role, ts, ts, rank[role]))
+        kv_set(conn, "neighbors_now", {"ts": ts, "nr": parse_neighbors(d.get("nr_neighbor_cell")),
+                                       "lte": parse_neighbors(d.get("lte_neighbor_cell"))})
+        sa = parse_band_list(d.get("nr5g_sa_band_lock"))
+        known = kv_get(conn, "sa_supported") or SA_BANDS_DEFAULT
+        if sa and not set(sa) <= set(known):
+            kv_set(conn, "sa_supported", sorted(set(known) | set(sa)))
+
+    def _lock_guard(self, conn, ts, s):
+        """Sicherheitsnetz: Findet der Router mit einer Sperre länger kein Netz, wird automatisch auf Automatik zurückgestellt."""
+        g = kv_get(conn, "lock_guard")
+        if not g or not g.get("active") or self.lock_busy.locked():
+            return
+        service = bool(s["net_type"]) and (s["nr_rsrp"] is not None or s["lte_rsrp"] is not None)
+        fb = int(g.get("fallback_s") or 0)
+        if service:
+            if g.get("no_service_since") or not g.get("ok_seen"):
+                g.update(no_service_since=None, ok_seen=True)
+                kv_set(conn, "lock_guard", g)
+            return
+        if not g.get("no_service_since"):
+            g["no_service_since"] = ts
+            kv_set(conn, "lock_guard", g)
+            return
+        if fb and ts - g["no_service_since"] >= fb:
+            g["active"] = False
+            kv_set(conn, "lock_guard", g)
+            add_event(conn, ts, "lock", f"Kein Netz seit {ts - g['no_service_since']} s mit Sperre ({g.get('desc', '?')}) - "
+                                        f"stelle auf Automatik zurück")
+            conn.commit()
+            threading.Thread(target=self._fallback_reset, args=(g.get("desc", "?"),), daemon=True).start()
+
+    def _fallback_reset(self, desc):
+        if not self.lock_busy.acquire(blocking=False):
+            return
+        try:
+            c = connect(self.cfg.db)
+            try:
+                sup = kv_get(c, "sa_supported")
+            finally:
+                c.close()
+            try:
+                res = self.router.reset_locks(sup)
+                detail = "Automatik wiederhergestellt" if res["ok"] else res["detail"]
+            except RouterError as exc:
+                detail = f"Zurückstellen fehlgeschlagen: {exc}"
+            c = connect(self.cfg.db)
+            try:
+                add_event(c, int(time.time()), "lock", f"Sicherheitsnetz: {detail}")
+                c.commit()
+            finally:
+                c.close()
+        finally:
+            self.lock_busy.release()
 
     def _poll_usage(self, conn, ts):
         r = self.router
@@ -1534,8 +1957,9 @@ class Collector(threading.Thread):
             # nach einem Zählerreset oder einer langen Lücke (z. B. Neustart des Dashboards) ist keine Rate bestimmbar
             if 0.5 <= dt <= max(300, 5 * self.cfg.usage_every) and not reset:
                 rx_speed, tx_speed = rx_d / dt, tx_d / dt
-        conn.execute("INSERT OR REPLACE INTO traffic VALUES(?,?,?,?,?,?,?,?,?)",
-                     (ts, u["rx_total"], u["tx_total"], u["rx_month"], u["tx_month"], rx_speed, tx_speed, rx_d, tx_d))
+        conn.execute("INSERT OR REPLACE INTO traffic(ts,rx_total,tx_total,rx_month,tx_month,rx_speed,tx_speed,rx_delta,tx_delta,cell) "
+                     "VALUES(?,?,?,?,?,?,?,?,?,?)",
+                     (ts, u["rx_total"], u["tx_total"], u["rx_month"], u["tx_month"], rx_speed, tx_speed, rx_d, tx_d, self.cur_cell))
         if not last and u["rx_day"] is not None:      # erster Abruf: bisherigen Tagesverbrauch vom Router übernehmen
             conn.execute("INSERT OR IGNORE INTO daily(day,rx,tx) VALUES(?,?,?)",
                          (datetime.fromtimestamp(ts).strftime("%Y-%m-%d"), int(u["rx_day"]), int(u["tx_day"] or 0)))
@@ -2952,6 +3376,221 @@ class Api:
             raise ValueError("Es läuft bereits ein Neustart")
         return {"started": True}
 
+    # -- Zellen & Bänder ------------------------------------------------------------------ #
+    @staticmethod
+    def _agg(rows):
+        """Mehrere Stundenzeilen (einer Zelle oder eines Bands) zu Kennzahlen zusammenfassen."""
+        n = sum(r["n"] or 0 for r in rows)
+        if not n:
+            return None
+        wavg = lambda k: (lambda xs: sum(v * w for v, w in xs) / sum(w for _, w in xs) if xs else None)(
+            [(r[k], r["n"]) for r in rows if r[k] is not None])
+        std = lambda m, sq: math.sqrt(max(0.0, sq - m * m)) if m is not None and sq is not None else None
+        rsrp, snr, rsrq, rssi = wavg("rsrp"), wavg("snr"), wavg("rsrq"), wavg("rssi")
+        rsrp_std, snr_std = std(rsrp, wavg("rsrp_sq")), std(snr, wavg("snr_sq"))
+        r = rate(rsrp, snr, rsrq)
+        mins = lambda k: min((x[k] for x in rows if x[k] is not None), default=None)
+        maxs = lambda k: max((x[k] for x in rows if x[k] is not None), default=None)
+        return {"n": n, "rsrp": rsrp, "snr": snr, "rsrq": rsrq, "rssi": rssi, "rsrp_std": rsrp_std, "snr_std": snr_std,
+                "rsrp_min": mins("rsrp_min"), "rsrp_max": maxs("rsrp_max"), "snr_min": mins("snr_min"), "snr_max": maxs("snr_max"),
+                "score": r["score"] if r else None, "level": r["level"] if r else None, "label": r["label"] if r else None,
+                "limiting": r["limiting"] if r else None, "stability": stability_label(rsrp_std, snr_std),
+                "rx": sum(x["rx"] or 0 for x in rows), "tx": sum(x["tx"] or 0 for x in rows), "rx_max": maxs("rx_max"),
+                "first": min(x["ts"] for x in rows), "last": max(x["ts"] for x in rows) + HOUR}
+
+    def _timeline(self, conn, since, until):
+        """Zeitabschnitte je aktiver Zelle: aus Rohdaten (genau) oder aus Stundenwerten (vorherrschende Zelle je Stunde)."""
+        segs = []
+        if since >= time.time() - self.cfg.raw_days * 86400 and until - since <= 31 * 86400:
+            gap = max(3 * self.cfg.poll, 120)
+            cur = None
+            for ts, k in conn.execute(f"SELECT ts, {CKEY_SQL} FROM samples WHERE ts>=? AND ts<=? "
+                                      f"AND COALESCE(nr_rsrp, lte_rsrp) IS NOT NULL ORDER BY ts", (since, until)):
+                if cur and cur[2] == k and ts - cur[1] <= gap:
+                    cur[1] = ts
+                else:
+                    if cur:
+                        segs.append(cur)
+                    cur = [ts, ts, k]
+            if cur:
+                segs.append(cur)
+            for sg in segs:                           # jeder Messpunkt steht für ein Abfrageintervall
+                sg[1] += self.cfg.poll
+            return segs, "raw"
+        dom = {}
+        for r in conn.execute("SELECT ts, ckey, n FROM cells_h WHERE ts>=? AND ts<=? ORDER BY ts", (since // HOUR * HOUR, until)):
+            if r["ts"] not in dom or r["n"] > dom[r["ts"]][1]:
+                dom[r["ts"]] = (r["ckey"], r["n"])
+        for ts in sorted(dom):
+            k = dom[ts][0]
+            if segs and segs[-1][2] == k and segs[-1][1] == ts:
+                segs[-1][1] = ts + HOUR
+            else:
+                segs.append([ts, ts + HOUR, k])
+        return segs, "hourly"
+
+    def cells(self, rng):
+        since, until, now, _ = self.window(rng)
+        if rng == "all":
+            since = 0
+        conn = self.conn()
+        try:
+            h0 = since // HOUR * HOUR
+            rows = [dict(r) for r in conn.execute("SELECT * FROM cells_h WHERE ts>=? AND ts<=? ORDER BY ts", (h0, until))]
+            # feste Farbreihenfolge: nach dem ersten Auftreten der Zelle überhaupt (die Farbe folgt der Zelle, nicht dem Rang)
+            order = [r[0] for r in conn.execute("SELECT ckey, MIN(ts) f FROM cells_h GROUP BY ckey ORDER BY f, ckey")]
+            by_cell, by_band = {}, {}
+            for r in rows:
+                by_cell.setdefault(r["ckey"], []).append(r)
+                by_band.setdefault((r["rat"], r["band"]), []).append(r)
+            total = sum(r["n"] or 0 for r in rows) or 1
+            last_seen = {k: v for k, v in conn.execute(
+                f"SELECT {CKEY_SQL} k, MAX(ts) FROM samples WHERE ts>=? AND COALESCE(nr_rsrp,lte_rsrp) IS NOT NULL GROUP BY k", (since,))}
+            cells = []
+            for k, rs in by_cell.items():
+                a = self._agg(rs)
+                if not a:
+                    continue
+                rat, band, pci, arfcn = (k.split("|") + ["", "", "", ""])[:4]
+                a.update(ckey=k, rat=rat, band=band, pci=int(pci) if pci.lstrip("-").isdigit() else None,
+                         arfcn=int(arfcn) if arfcn.isdigit() else None, bw=max((x["bw"] or 0 for x in rs), default=None) or None,
+                         share=a["n"] / total, secs=a["n"] * self.cfg.poll, color=order.index(k) if k in order else None,
+                         last=last_seen.get(k) or min(a["last"], now),
+                         lockable=rat == "NR" and pci.isdigit() and arfcn.isdigit())
+                cells.append(a)
+            cells.sort(key=lambda c: (c["score"] is None, -(c["score"] or 0), -c["n"]))
+            bands = []
+            for (rat, band), rs in by_band.items():
+                a = self._agg(rs)
+                if a:
+                    a.update(rat=rat, band=band, share=a["n"] / total, secs=a["n"] * self.cfg.poll,
+                             cells=len({x["ckey"] for x in rs}))
+                    bands.append(a)
+            bands.sort(key=lambda b: -b["n"])
+            segs, res = self._timeline(conn, since if rng != "all" else (conn.execute("SELECT MIN(ts) FROM cells_h").fetchone()[0] or now), until)
+            # Nachbarzellen und alle je gesehenen Zellen
+            served = {(c["pci"], c["arfcn"]): c for c in cells if c["rat"] == "NR"}
+            nb_now = kv_get(conn, "neighbors_now") or {}
+            now_set = {tuple(x) for x in nb_now.get("nr", [])} if nb_now.get("ts", 0) > now - 300 else set()
+            seen = []
+            for r in conn.execute("SELECT * FROM cells_seen WHERE last_seen>=? ORDER BY last_seen DESC, n DESC LIMIT 200",
+                                  (min(since, now - 30 * 86400),)):
+                band = nr_band_of(r["arfcn"]) if r["rat"] == "NR" else lte_band_of(r["arfcn"])
+                sv = served.get((r["pci"], r["arfcn"])) if r["rat"] == "NR" else None
+                seen.append({"rat": r["rat"], "pci": r["pci"], "arfcn": r["arfcn"], "band": (sv or {}).get("band") or band,
+                             "role": r["role"], "first_seen": r["first_seen"], "last_seen": r["last_seen"], "n": r["n"],
+                             "visible": (r["pci"], r["arfcn"]) in now_set, "served": bool(sv),
+                             "score": (sv or {}).get("score"), "level": (sv or {}).get("level"), "label": (sv or {}).get("label"),
+                             "rsrp": (sv or {}).get("rsrp"), "snr": (sv or {}).get("snr"),
+                             "lockable": r["rat"] == "NR" and bool(band or sv)})
+            ev = [dict(r) for r in conn.execute(
+                "SELECT ts, kind, detail FROM events WHERE kind IN ('cell','lock') AND ts>=? ORDER BY ts DESC LIMIT 60", (since,))]
+            guard = kv_get(conn, "lock_guard")
+            sa_sup = kv_get(conn, "sa_supported") or SA_BANDS_DEFAULT
+            last_lock = kv_get(conn, "last_lock")
+        finally:
+            conn.close()
+        col = self.collector
+        d = col.last_netinfo if col else None
+        cur = None
+        if d:
+            s = parse_sample(col.last_netinfo_ts or now, d)
+            cur = {**s, "ca": json.loads(s["ca"] or "[]"), "ckey": sample_key(s), "ts": col.last_netinfo_ts}
+            r = rate(*(s["nr_rsrp"], s["nr_snr"], s["nr_rsrq"]) if s["nr_rsrp"] is not None else (s["lte_rsrp"], s["lte_snr"], s["lte_rsrq"]))
+            cur.update(score=r["score"] if r else None, level=r["level"] if r else None, label=r["label"] if r else None)
+        lock = lock_state(d, sa_sup) if d else None
+        if lock and lock["nr_cell"] and cur:
+            p = lock["nr_cell"]["parts"]
+            lock["on_target"] = cur.get("pci") is not None and str(cur["pci"]) == p[0]
+        return {"now": now, "range": rng, "since": since, "until": until, "total_n": total if rows else 0,
+                "cells": cells, "bands": bands, "timeline": segs, "timeline_res": res, "neighbors": seen,
+                "neighbors_ts": nb_now.get("ts"), "events": ev, "current": cur, "lock": lock,
+                "guard": guard, "last_lock": last_lock, "busy": bool(col and col.lock_busy.locked()),
+                "can_lock": bool(col and col.router.can_login), "poll": self.cfg.poll}
+
+    def cells_lock(self, body):
+        """Band-/Zellsperre setzen oder alles auf Automatik. body: {mode: auto|sa_bands|lte_bands|nr_cell, ...}"""
+        col = self.collector
+        if not col or not col.router.can_login:
+            raise ValueError("Für die Sperre wird das Router-Passwort benötigt (Einstellungen → Router-Verbindung)")
+        mode = str(body.get("mode") or "")
+        conn = self.conn()
+        try:
+            sa_sup = kv_get(conn, "sa_supported") or SA_BANDS_DEFAULT
+        finally:
+            conn.close()
+        fallback = _int(body.get("fallback_s"), 0, 3600, 180)
+        if fallback and fallback < 60:
+            fallback = 60
+        if mode == "auto":
+            desc, p = "Automatik", None
+        elif mode in ("sa_bands", "lte_bands"):
+            bands = sorted({b for b in (band_num(x) for x in (body.get("bands") or [])) if b})
+            if not bands:
+                raise ValueError("Bitte mindestens ein Band auswählen")
+            allowed = set(sa_sup) if mode == "sa_bands" else set(
+                parse_band_list((col.last_netinfo or {}).get("lte_band")) or LTE_BANDS_DEFAULT)
+            bad = [b for b in bands if b not in allowed]
+            if bad:
+                raise ValueError(f"Band {', '.join(map(str, bad))} wird vom Router nicht unterstützt")
+            p = {"bands": bands}
+            desc = ("5G-Bänder " + ", ".join(f"n{b}" for b in bands)) if mode == "sa_bands" else \
+                   ("LTE-Bänder " + ", ".join(f"B{b}" for b in bands))
+        elif mode == "nr_cell":
+            pci = _int(body.get("pci"), 0, 1007, None)
+            arfcn = _int(body.get("arfcn"), 0, 3279165, None)
+            if pci is None or arfcn is None:
+                raise ValueError("PCI (0–1007) und ARFCN angeben")
+            band = band_num(body.get("band")) or band_num(nr_band_of(arfcn))
+            if not band:
+                raise ValueError("Band unbekannt - bitte angeben")
+            scs = _int(body.get("scs"), 15, 120, default_scs(band))
+            if scs not in (15, 30, 60, 120):
+                raise ValueError("Unterträgerabstand (SCS) muss 15, 30, 60 oder 120 kHz sein")
+            p = {"pci": pci, "arfcn": arfcn, "band": band, "scs": scs}
+            desc = f"5G-Zelle PCI {pci} / ARFCN {arfcn} (n{band}, {scs} kHz)"
+        else:
+            raise ValueError("Unbekannte Sperr-Art")
+        if not col.lock_busy.acquire(blocking=False):
+            raise ValueError("Es läuft bereits eine Änderung - bitte kurz warten")
+        try:
+            try:
+                res = col.router.reset_locks(sa_sup) if mode == "auto" else col.router.apply_lock(mode, p)
+            except RouterError as exc:
+                res = {"ok": False, "detail": str(exc), "steps": [], "args": None}
+            ts = int(time.time())
+            conn = self.conn()
+            try:
+                add_event(conn, ts, "lock", f"{desc}: {res['detail']}" if not res["ok"] else
+                          ("Automatik wiederhergestellt" if mode == "auto" else f"Gesperrt auf {desc}"))
+                if res["ok"]:
+                    kv_set(conn, "lock_guard", None if mode == "auto" else
+                           {"active": bool(fallback), "since": ts, "fallback_s": fallback, "desc": desc, "mode": mode,
+                            "no_service_since": None, "ok_seen": False})
+                kv_set(conn, "last_lock", {"ts": ts, "mode": mode, "desc": desc, "ok": res["ok"], "detail": res["detail"],
+                                           "args": res.get("args"), "steps": res.get("steps", [])})
+                conn.commit()
+            finally:
+                conn.close()
+            try:
+                col.last_netinfo, col.last_netinfo_ts = col.router.netinfo(), int(time.time())
+            except RouterError:
+                pass
+        finally:
+            col.lock_busy.release()
+        return {**res, "desc": desc, **{k: v for k, v in self.cells("24h").items() if k in ("lock", "guard", "last_lock", "current")}}
+
+    def cells_methods(self):
+        """Diagnose: welche Sperr-Methoden und Argumente meldet der Router?"""
+        col = self.collector
+        if not col or not col.router.can_login:
+            raise ValueError("Dafür wird das Router-Passwort benötigt")
+        try:
+            sig = col.router.lock_signature(refresh=True)
+        except RouterError as exc:
+            return {"ok": False, "error": str(exc), "methods": {}}
+        return {"ok": True, "methods": sig, "known": Router.LOCK_METHODS}
+
     def export_csv(self, rng, kind="signal", t_from=None, t_to=None):
         since, until, _, _ = self.window(rng, t_from, t_to)
         conn = self.conn()
@@ -3150,6 +3789,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.api.live(self._opt_int(q, "since") or 0))
             if url.path == "/api/spots":
                 return self._json(200, self.api.spots())
+            if url.path == "/api/cells":
+                return self._json(200, self.api.cells(rng if rng in RANGES or rng == "all" else "7d"))
+            if url.path == "/api/cells/methods":
+                return self._json(200, self.api.cells_methods())
             if url.path == "/api/usage_series":
                 bucket = q.get("bucket", ["1d"])[0]
                 return self._json(200, self.api.usage_series(bucket, self._opt_int(q, "count"), t_from, t_to))
@@ -3227,6 +3870,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, self.api.add_spot(body))
             if path == "/api/spots/delete":
                 return self._json(200, self.api.delete_spot(body))
+            if path == "/api/cells/lock":
+                return self._json(200, self.api.cells_lock(body))
             if path == "/api/sms/send":
                 return self._json(200, {"ok": True, "message": self.api.sms_send(body.get("number"), body.get("text"), "dashboard")})
             if path == "/api/sms/read":
@@ -3372,6 +4017,32 @@ def test_sms(cfg, number):
     return 2
 
 
+def probe_lock(cfg):
+    """Nur lesen: Sperr-Methoden von zte_nwinfo_api und den aktuellen Sperr-Zustand anzeigen. Ändert nichts am Router."""
+    r = Router(cfg)
+    d = r.netinfo()
+    print("Aktuell: Netz =", d.get("network_type"), "| Band =", d.get("nr5g_action_band") or d.get("wan_active_band"),
+          "| PCI =", d.get("nr5g_pci"), "| ARFCN =", d.get("nr5g_action_channel"))
+    print("\nSperr-Felder aus nwinfo_get_netinfo (ohne Login):")
+    for k in ("net_select", "nr5g_sa_band_lock", "nr5g_nsa_band_lock", "nr5g_nrdc_band_lock", "lte_band_lock", "lte_band",
+              "gw_band_lock", "lock_nr_cell", "lock_lte_cell", "nr_neighbor_cell", "lte_neighbor_cell"):
+        print(f"  {k:22} = {d.get(k)!r}")
+    st = lock_state(d)
+    print("  -> Zustand:", st["summary"])
+    if not r.can_login:
+        print("\nKein Router-Passwort gesetzt - die Methodenliste braucht den Login.")
+        return 0
+    r.login()
+    sig = r.list_methods("zte_nwinfo_api")
+    print(f"\nubus list zte_nwinfo_api: {len(sig)} Methoden")
+    for m in sorted(sig):
+        mark = "  <- Sperre" if m in Router.LOCK_METHODS.values() else ""
+        print(f"  {m}({', '.join(f'{a}:{t}' for a, t in (sig[m] or {}).items())}){mark}")
+    if not sig:
+        print("  (Router liefert keine Methodenliste - das Dashboard probiert dann bekannte Schreibweisen und prüft das Ergebnis)")
+    return 0
+
+
 def test_reconnect(cfg):
     r = Router(cfg)
     if not r.can_login:
@@ -3394,6 +4065,7 @@ def main():
     ap.add_argument("--probe-sms", action="store_true", help="SMS-Schnittstelle des Routers prüfen (Diagnose)")
     ap.add_argument("--test-sms", metavar="NUMMER", help="Eine Test-SMS an NUMMER senden und die Antworten des Routers zeigen (Diagnose)")
     ap.add_argument("--test-reconnect", action="store_true", help="Verbindung einmalig neu aufbauen (mit Rückfrage)")
+    ap.add_argument("--probe-lock", action="store_true", help="Band-/Zellsperre: Methoden und Zustand anzeigen (ändert nichts)")
     ap.add_argument("--reset-auth", action="store_true", help="Dashboard-Passwortschutz abschalten (falls das Passwort vergessen wurde)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args()
@@ -3427,6 +4099,12 @@ def main():
             sys.exit(1)
     if args.test_reconnect:
         sys.exit(test_reconnect(cfg))
+    if args.probe_lock:
+        try:
+            sys.exit(probe_lock(cfg))
+        except RouterError as exc:
+            print("FEHLER:", exc)
+            sys.exit(1)
     init_db(cfg.db)
     auth = Auth(cfg.db)
     if cfg.dash_password and not auth.enabled and not auth.a:

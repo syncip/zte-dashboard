@@ -325,6 +325,32 @@ pre.code code { background: none; padding: 0; font: inherit; }
 .tokenbox code { display: block; margin: 6px 0; padding: 6px 8px; overflow-wrap: anywhere; user-select: all; }
 .permrow { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; }
 .permrow label { display: inline-flex; gap: 6px; align-items: center; font-size: 13px; }
+
+/* Zellen & Bänder */
+.lockhead { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin: 4px 0 2px; }
+.lockhead .word { font-size: 30px; font-weight: 700; letter-spacing: -.02em; line-height: 1.1; }
+.lockhead .sumtxt { color: var(--ink-2); font-size: 13.5px; }
+.lockpanel { border-top: 1px solid var(--grid); margin-top: 12px; padding-top: 12px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 10px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 11px 3px 8px; font-size: 13px; cursor: pointer; background: var(--surface); user-select: none; }
+.chip:has(input:checked) { background: var(--wash); border-color: var(--s1); font-weight: 600; }
+.chip input { width: 15px; height: 15px; margin: 0; }
+.chip .cur { font-size: 11px; color: var(--ink-2); font-weight: 500; }
+.cellform { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 8px 0 10px; }
+.cellform label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--ink-2); }
+@media (max-width: 620px) { .cellform { grid-template-columns: 1fr 1fr; } }
+.lockact { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
+.lockact select { width: auto; }
+.ckey { display: inline-block; width: 10px; height: 10px; border-radius: 3px; vertical-align: middle; margin-right: 7px; flex: none; }
+.cname { display: inline-flex; align-items: center; gap: 0; font-weight: 600; }
+.cname small { font-weight: 400; color: var(--ink-2); margin-left: 6px; font-size: 11.5px; }
+td .badge { margin-left: 6px; font-size: 11px; }
+.badge.on { border-color: var(--s1); color: var(--ink); }
+.lanes text.lane { fill: var(--ink-2); font-size: 11.5px; }
+.lanes rect.seg { rx: 2px; }
+.lanes rect.seg:hover { stroke: var(--ink); stroke-width: 1.5; }
+.okline { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-top: 6px; color: var(--ink-2); }
+.okline b { color: var(--ink); }
 </style>
 </head>
 <body>
@@ -343,6 +369,7 @@ pre.code code { background: none; padding: 0; font: inherit; }
   <nav class="tabs" aria-label="Seiten">
     <a href="#/" data-p="dash">Dashboard</a>
     <a href="#/analysis" data-p="analysis">Auswertung</a>
+    <a href="#/cells" data-p="cells">Zellen &amp; Bänder</a>
     <a href="#/sms" data-p="sms">SMS<span class="nbadge" id="sms-badge" hidden></span></a>
     <a href="#/setup" data-p="setup">Setup</a>
     <a href="#/settings" data-p="settings">Einstellungen</a>
@@ -497,6 +524,36 @@ pre.code code { background: none; padding: 0; font: inherit; }
   <section class="grid"><div class="card c12" id="a-insights"></div></section>
   <section class="grid"><div class="card c12" id="a-hour"></div></section>
   <section class="grid"><div class="card c12" id="a-heat"></div></section>
+</main>
+
+<!-- Zellen & Bänder -->
+<main class="page" id="page-cells" hidden>
+  <div class="filters" role="group" aria-label="Zellen">
+    <div class="seg" id="c-ranges" aria-label="Zeitraum">
+      <button type="button" data-r="24h">24 Std</button><button type="button" data-r="7d">7 Tage</button>
+      <button type="button" data-r="30d">30 Tage</button><button type="button" data-r="90d">90 Tage</button>
+      <button type="button" data-r="365d">1 Jahr</button><button type="button" data-r="all">Alles</button>
+    </div>
+    <span class="spacer"></span>
+    <span class="upd" id="c-info"></span>
+  </div>
+  <div class="banner" id="c-banner" hidden role="alert"></div>
+  <section class="grid">
+    <div class="card c5" id="c-now"></div>
+    <div class="card c7" id="c-lock"></div>
+  </section>
+  <section class="grid"><div class="card c12" id="c-rank"></div></section>
+  <section class="grid"><div class="card c12" id="c-time"></div></section>
+  <section class="grid">
+    <div class="card c5" id="c-bands"></div>
+    <div class="card c7" id="c-nb"></div>
+  </section>
+  <section class="grid">
+    <div class="card c12">
+      <div class="card-h"><div><h2>Zellwechsel &amp; Sperren</h2><p>Die letzten Wechsel der aktiven Zelle und alle Änderungen an der Sperre</p></div></div>
+      <ul class="events" id="c-events"></ul>
+    </div>
+  </section>
 </main>
 
 <!-- Setup: Router-Standort finden -->
@@ -1186,7 +1243,7 @@ async function loadHistory(force) {
     if (!total) { const seg = document.createElement("i"); seg.style.flex = "1"; seg.style.background = "var(--wash)"; qb.appendChild(seg); }
     // Ereignisse
     const ev = $("#events"); ev.replaceChildren();
-    const KIND = { cell: "Zellwechsel", offline: "Router offline", online: "Router online", usage: "Datenverbrauch", outage: "Ausfall", outage_end: "Wieder erreichbar", reconnect: "Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus", sms_in: "SMS empfangen", sms_out: "SMS gesendet", sms_fail: "SMS fehlgeschlagen" };
+    const KIND = { lock: "Sperre", cell: "Zellwechsel", offline: "Router offline", online: "Router online", usage: "Datenverbrauch", outage: "Ausfall", outage_end: "Wieder erreichbar", reconnect: "Neustart", reconnect_fail: "Neustart fehlgeschlagen", reconnect_dry: "Testmodus", sms_in: "SMS empfangen", sms_out: "SMS gesendet", sms_fail: "SMS fehlgeschlagen" };
     for (const e of h.events) { const li = el("li"); li.append(el("time", "", dateFmt.format(new Date(e.ts * 1000))), el("span", "badge", KIND[e.kind] || e.kind), el("span", "", e.detail)); ev.appendChild(li); }
     if (!h.events.length) ev.appendChild(el("li", "muted", "Keine Ereignisse im gewählten Zeitraum."));
     // Verbrauch im Zeitraum
@@ -2201,9 +2258,321 @@ function smsRenderApi(box) {
   box.appendChild(docs);
 }
 
+/* ---------- Zellen & Bänder ---------- */
+const CE = {
+  range: (() => { try { return localStorage.getItem("zte-c-range") || "7d"; } catch { return "7d"; } })(),
+  data: null, busy: false, mode: null, result: null, cellForm: null, loadedRange: null,
+};
+const C_KIND = { cell: "Zellwechsel", lock: "Sperre" };
+const cColor = (i) => (i == null || i > 7 ? "var(--muted)" : `var(--c${i + 1})`);
+const cKey = (c) => { const k = el("span", "ckey"); k.style.background = cColor(c.color); return k; };
+const ratLabel = (r) => (r === "NR" ? "5G" : "LTE");
+const cellName = (c) => [c.band || ratLabel(c.rat), c.pci != null ? `PCI ${c.pci}` : null].filter(Boolean).join(" · ");
+const agoFmt = (t, now) => { const s = now - t; return s < 90 ? "gerade eben" : s < 5400 ? `vor ${Math.round(s / 60)} min` : s < 172800 ? `vor ${Math.round(s / 3600)} Std` : `vor ${Math.round(s / 86400)} Tagen`; };
+const rateNode = (level, label, score) => {
+  const q = el("span", "q");
+  if (!level) { q.className = "label"; q.textContent = "–"; return q; }
+  q.append(suIcon(level), document.createTextNode(`${label}${score != null ? ` · ${fmt(score)}` : ""}`)); return q;
+};
+function cMark() { $("#c-ranges").querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.r === CE.range)); }
+$("#c-ranges").addEventListener("click", (e) => {
+  const b = e.target.closest("button"); if (!b) return; CE.range = b.dataset.r;
+  try { localStorage.setItem("zte-c-range", CE.range); } catch {} cMark(); cellsLoad(true);
+});
+
+async function cellsLoad(full) {
+  cMark();
+  try {
+    const d = await getJSON(`/api/cells?range=${CE.range}`);
+    CE.data = d; $("#c-banner").hidden = true;
+    renderCellsNow(d);
+    if (!CE.busy) renderLock(d);
+    renderRank(d); renderTimeline(d); renderBands(d); renderNeighbors(d); renderCellEvents(d);
+    CE.loadedRange = CE.range;
+    $("#c-info").textContent = d.total_n ? `${fmt(d.cells.length)} Zellen · ${fmt(d.total_n)} Messpunkte im Zeitraum` : "Noch keine Messwerte im Zeitraum";
+  } catch (e) {
+    const b = $("#c-banner"); b.hidden = false; b.textContent = "Zellen-Daten nicht verfügbar: " + e.message;
+  }
+}
+
+/* Aktuelle Zelle */
+function renderCellsNow(d) {
+  const box = $("#c-now"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div"); tt.append(el("h2", "", "Aktuelle Verbindung"), el("p", "", d.current && d.current.ts ? `Stand ${timeFmt(d.current.ts)} Uhr` : "Warte auf Messung …")); head.appendChild(tt); box.appendChild(head);
+  const c = d.current;
+  if (!c || !c.ckey) { box.appendChild(el("p", "note", c ? "Das Modem ist gerade in keinem Netz eingebucht." : "Noch keine Daten vom Router.")); return; }
+  const known = d.cells.find((x) => x.ckey === c.ckey);
+  const nr = c.nr_rsrp != null;
+  const lh = el("div", "lockhead");
+  const w = el("span", "word", `${c.band || "–"}${c.pci != null ? " · PCI " + c.pci : ""}`);
+  lh.append(known ? cKey(known) : el("span"), w); box.appendChild(lh);
+  box.appendChild(rateNode(c.level, c.label, c.score));
+  const meta = el("div", "meta");
+  const add = (k, v) => { if (v == null || v === "") return; const sp = el("span"); sp.append(document.createTextNode(k + " "), el("b", "", v)); meta.appendChild(sp); };
+  add("Netz", netLabel(c.net_type)); add("ARFCN", c.arfcn != null ? String(c.arfcn) : null); add("Bandbreite", c.bw ? c.bw + " MHz" : null);
+  add("RSRP", `${fmt(nr ? c.nr_rsrp : c.lte_rsrp)} dBm`); add("SINR", `${fmt(nr ? c.nr_snr : c.lte_snr, 1)} dB`); add("RSRQ", `${fmt(nr ? c.nr_rsrq : c.lte_rsrq)} dB`);
+  box.appendChild(meta);
+  if ((c.ca || []).length) {
+    const n = el("div", "note"); n.textContent = "Zusatzträger: " + c.ca.map((x) => `${x.band} (PCI ${x.pci}, ${fmt(x.rsrp)} dBm)`).join(", "); box.appendChild(n);
+  }
+  if (known) {
+    const rank = d.cells.indexOf(known) + 1;
+    box.appendChild(el("div", "note", `Im Zeitraum Platz ${rank} von ${d.cells.length} · ${fmt(known.share * 100, 0)} % der Zeit aktiv · Ø ${known.label} (${fmt(known.score)})`));
+  }
+}
+
+/* Sperre */
+const FALLBACKS = [[60, "1 min"], [120, "2 min"], [180, "3 min"], [300, "5 min"], [600, "10 min"], [0, "nie (nicht empfohlen)"]];
+function renderLock(d) {
+  const box = $("#c-lock"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div");
+  tt.append(el("h2", "", "Band- und Zellsperre"), el("p", "", "Router auf bestimmte Bänder oder eine Zelle festlegen – oder die Wahl dem Router überlassen (Automatik)"));
+  head.appendChild(tt); box.appendChild(head);
+  const L = d.lock;
+  if (!L) { box.appendChild(el("p", "note", "Sperr-Zustand noch unbekannt (keine Antwort vom Router).")); return; }
+  const lh = el("div", "lockhead");
+  lh.append(el("span", "word", L.mode === "auto" ? "Automatik" : "Gesperrt"), el("span", "sumtxt", L.mode === "auto" ? "Der Router wählt Band und Zelle selbst" : L.summary));
+  box.appendChild(lh);
+  if (L.nr_cell && L.on_target != null) {
+    const ok = el("div", "okline"); ok.append(suIcon(L.on_target ? "good" : "poor"), document.createTextNode(L.on_target ? "Verbunden mit der gesperrten Zelle" : "Noch nicht mit der gesperrten Zelle verbunden"));
+    box.appendChild(ok);
+  }
+  if (L.mode !== "auto" && d.guard) {
+    const g = d.guard, n = el("div", "note");
+    n.textContent = g.active ? `Sicherheitsnetz aktiv: nach ${fmt(g.fallback_s / 60)} min ohne Netz stellt das Dashboard automatisch auf Automatik zurück.`
+      : g.fallback_s ? "Sicherheitsnetz hat bereits ausgelöst." : "Sicherheitsnetz aus – bei Problemen hier auf Automatik stellen.";
+    box.appendChild(n);
+  }
+  if (!d.can_lock) { box.appendChild(el("p", "note warn", "Zum Sperren wird das Router-Passwort benötigt (Einstellungen → Router-Verbindung). Anzeigen geht auch ohne.")); return; }
+
+  const modes = [["auto", "Automatik"], ["sa_bands", "5G-Bänder"], ["lte_bands", "LTE-Bänder"], ["nr_cell", "5G-Zelle"]];
+  if (!CE.mode) CE.mode = L.nr_cell ? "nr_cell" : L.sa_locked ? "sa_bands" : L.lte_locked ? "lte_bands" : "auto";
+  const segm = el("div", "seg"); segm.setAttribute("aria-label", "Art der Sperre");
+  for (const [k, lab] of modes) { const b = el("button", "", lab); b.type = "button"; b.setAttribute("aria-pressed", CE.mode === k); b.onclick = () => { CE.mode = k; CE.result = null; renderLock(CE.data); }; segm.appendChild(b); }
+  const panel = el("div", "lockpanel"); box.append(segm, panel);
+
+  let collect = () => ({});
+  if (CE.mode === "auto") {
+    panel.appendChild(el("p", "hint", "Hebt alle Band- und Zellsperren auf. Der Router wählt wieder selbst die beste Verbindung."));
+  } else if (CE.mode === "sa_bands" || CE.mode === "lte_bands") {
+    const sa = CE.mode === "sa_bands", sup = sa ? L.sa_supported : L.lte_supported, cur = sa ? L.sa_bands : L.lte_bands;
+    const used = new Set(d.bands.map((b) => b.band));
+    panel.appendChild(el("p", "hint", sa ? "Nur die angehakten 5G-Bänder (Standalone) sind erlaubt. Tipp: n78 hat die höchste Datenrate, n1/n28 reichen weiter und gehen besser durch Wände."
+      : "Nur die angehakten LTE-Bänder sind erlaubt (wirkt, wenn der Router LTE nutzt)."));
+    const chips = el("div", "chips");
+    for (const b of sup) {
+      const name = (sa ? "n" : "B") + b, lab = el("label", "chip"), cb = el("input"); cb.type = "checkbox"; cb.value = b;
+      cb.checked = cur.includes(b) || !cur.length;
+      lab.append(cb, document.createTextNode(name)); if (used.has(name)) lab.appendChild(el("span", "cur", "genutzt"));
+      chips.appendChild(lab);
+    }
+    panel.appendChild(chips);
+    collect = () => ({ bands: [...chips.querySelectorAll("input:checked")].map((x) => Number(x.value)) });
+  } else {
+    panel.appendChild(el("p", "hint", "Den Router auf eine bestimmte 5G-Zelle festlegen. Die Liste enthält alle Zellen, die der Router bisher als aktive Zelle oder Nachbarzelle gemeldet hat (bewertete zuerst)."));
+    const sel = el("select"); sel.setAttribute("aria-label", "Bekannte Zelle wählen");
+    sel.appendChild(new Option("Zelle wählen …", ""));
+    const opts = [];
+    for (const c of d.cells.filter((x) => x.lockable)) opts.push({ pci: c.pci, arfcn: c.arfcn, band: c.band, txt: `${c.band} · PCI ${c.pci} · ARFCN ${c.arfcn} – ${c.label} (${fmt(c.score)}), ${fmt(c.share * 100, 0)} % der Zeit` });
+    for (const n of d.neighbors.filter((x) => x.lockable && x.rat === "NR" && !x.served)) opts.push({ pci: n.pci, arfcn: n.arfcn, band: n.band, txt: `${n.band || "?"} · PCI ${n.pci} · ARFCN ${n.arfcn} – Nachbarzelle, noch nicht genutzt` });
+    opts.forEach((o, i) => sel.appendChild(new Option(o.txt, String(i))));
+    const f = CE.cellForm || (L.nr_cell ? { pci: L.nr_cell.parts[0], arfcn: L.nr_cell.parts[1], band: L.nr_cell.parts[2] ? "n" + L.nr_cell.parts[2].replace(/^n/, "") : "", scs: "" } : { pci: "", arfcn: "", band: "", scs: "" });
+    const form = el("div", "cellform");
+    const inp = (lab, key, ph) => { const l = el("label", "", lab), i = el("input"); i.type = "text"; i.inputMode = key === "band" ? "text" : "numeric"; i.placeholder = ph; i.value = f[key] ?? ""; i.oninput = () => { CE.cellForm = { ...readForm() }; }; l.appendChild(i); form.appendChild(l); return i; };
+    const iP = inp("PCI", "pci", "z. B. 768"), iA = inp("ARFCN", "arfcn", "z. B. 641760"), iB = inp("Band", "band", "automatisch");
+    const lS = el("label", "", "SCS"), iS = el("select"); for (const [v, t] of [["", "automatisch"], ["15", "15 kHz"], ["30", "30 kHz"]]) iS.appendChild(new Option(t, v)); iS.value = f.scs || ""; lS.appendChild(iS); form.appendChild(lS);
+    const readForm = () => ({ pci: iP.value.trim(), arfcn: iA.value.trim(), band: iB.value.trim(), scs: iS.value });
+    sel.onchange = () => { const o = opts[Number(sel.value)]; if (!o) return; iP.value = o.pci; iA.value = o.arfcn; iB.value = o.band || ""; iS.value = ""; CE.cellForm = readForm(); };
+    panel.append(sel, form, el("p", "hint", "SCS (Unterträgerabstand) wird aus dem Band abgeleitet: n78/n77/n41/n40/n38 → 30 kHz, sonst 15 kHz."));
+    collect = () => { const r = readForm(); return { pci: r.pci, arfcn: r.arfcn, band: r.band || undefined, scs: r.scs || undefined }; };
+  }
+  const act = el("div", "lockact");
+  const fb = el("select"); fb.setAttribute("aria-label", "Sicherheitsnetz");
+  for (const [v, t] of FALLBACKS) fb.appendChild(new Option(`Zurück auf Automatik ohne Netz nach ${t}`, String(v)));
+  fb.value = String(CE.fallback ?? 180); fb.onchange = () => { CE.fallback = Number(fb.value); };
+  const go = el("button", "btn primary", CE.mode === "auto" ? "Auf Automatik stellen" : CE.mode === "nr_cell" ? "Zelle sperren" : "Bänder sperren"); go.type = "button";
+  if (CE.mode === "auto" && L.mode === "auto") go.disabled = true;
+  const probeB = el("button", "btn", "Schnittstelle prüfen"); probeB.type = "button"; probeB.title = "Zeigt, welche Sperr-Befehle und Argumente der Router meldet (ändert nichts)";
+  if (CE.mode !== "auto") act.appendChild(fb);
+  act.append(go, probeB);
+  panel.appendChild(act);
+  const out = el("div"); panel.appendChild(out);
+  if (CE.result) showLockResult(out, CE.result);
+  go.onclick = async () => {
+    const body = { mode: CE.mode, fallback_s: Number(fb.value), ...collect() };
+    const what = CE.mode === "auto" ? "alle Sperren aufheben" : CE.mode === "nr_cell" ? `auf Zelle PCI ${body.pci} / ARFCN ${body.arfcn} sperren` : `nur ${body.bands.map((b) => (CE.mode === "sa_bands" ? "n" : "B") + b).join(", ")} erlauben`;
+    if (!confirm(`Router ${what}?\n\nDie Mobilfunkverbindung ist dabei kurz (ca. 10–60 s) unterbrochen.`)) return;
+    CE.busy = true; go.disabled = true; go.textContent = "Wird übertragen …"; out.replaceChildren(el("p", "note", "Befehl wird gesendet und geprüft – das dauert einige Sekunden …"));
+    try { const r = await api("POST", "/api/cells/lock", body); CE.result = r; if (r.ok && CE.mode === "auto") CE.mode = "auto"; }
+    catch (e) { CE.result = { ok: false, detail: e.message, steps: [] }; }
+    CE.busy = false; CE.data && (CE.data.lock = CE.result.lock || CE.data.lock);
+    await cellsLoad(true);
+  };
+  probeB.onclick = async () => {
+    probeB.disabled = true; out.replaceChildren(el("p", "note", "Frage den Router …"));
+    try {
+      const r = await api("GET", "/api/cells/methods");
+      const known = new Set(Object.values(r.known || {}));
+      const ul = el("ul", "steps");
+      const names = Object.keys(r.methods || {}).sort();
+      if (!r.ok) ul.appendChild(el("li", "", r.error));
+      else if (!names.length) ul.appendChild(el("li", "", "Der Router liefert keine Methodenliste. Das Dashboard probiert dann bekannte Schreibweisen und prüft jedes Mal, ob die Änderung übernommen wurde."));
+      for (const m of names) { const li = el("li"); li.append(el("code", "", `${m}(${Object.keys(r.methods[m] || {}).join(", ")})`)); if (known.has(m)) li.appendChild(el("span", "badge", "Sperre")); ul.appendChild(li); }
+      out.replaceChildren(el("div", "sec", "zte_nwinfo_api – gemeldete Befehle"), ul);
+    } catch (e) { out.replaceChildren(el("p", "note", "Nicht möglich: " + e.message)); }
+    probeB.disabled = false;
+  };
+}
+function showLockResult(box, r) {
+  const line = el("div", "okline"); line.append(suIcon(r.ok ? "good" : "bad"), el("b", "", r.ok ? "Übernommen" : "Nicht übernommen"), document.createTextNode(" – " + (r.ok ? (r.desc || "") : r.detail)));
+  box.appendChild(line);
+  if ((r.steps || []).length) {
+    const det = el("details", "help"), sm = el("summary", "", "Details"); det.appendChild(sm);
+    const ul = el("ul"); for (const s of r.steps) ul.appendChild(el("li", "", (s.ok ? "✓ " : "✗ ") + s.text)); det.appendChild(ul); box.appendChild(det);
+  }
+}
+function lockCell(c) {
+  CE.mode = "nr_cell"; CE.result = null; CE.cellForm = { pci: String(c.pci), arfcn: String(c.arfcn), band: c.band || "", scs: "" };
+  renderLock(CE.data); $("#c-lock").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+/* Rangliste */
+function renderRank(d) {
+  const box = $("#c-rank"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div");
+  tt.append(el("h2", "", "Welche Zelle war wie gut?"), el("p", "", "Bewertung aus Ø RSRP (40 %), Ø SINR (45 %) und Ø RSRQ (15 %) · beste oben · Farbe = Zelle wie in der Zeitleiste"));
+  head.appendChild(tt); box.appendChild(head);
+  if (!d.cells.length) { box.appendChild(el("p", "note", "Noch keine Zellen im Zeitraum. Die Werte kommen aus den Stundenwerten und erscheinen spätestens 10 Minuten nach dem Start.")); return; }
+  const sc = el("div", "scroll"), t = el("table"), th = el("thead"), tr = el("tr");
+  ["#", "Zelle", "Anteil der Zeit", "Ø RSRP", "Ø SINR", "Ø RSRQ", "Bewertung", "Daten", "Spitze", "Zuletzt", ""].forEach((c, i) => tr.appendChild(el("th", [0, 1, 2, 6, 9, 10].includes(i) ? "" : "num", c)));
+  th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody"), maxShare = Math.max(...d.cells.map((c) => c.share));
+  const curKey = d.current && d.current.ckey, lockPci = d.lock && d.lock.nr_cell ? d.lock.nr_cell.parts[0] : null;
+  d.cells.forEach((c, i) => {
+    const row = el("tr");
+    const nm = el("td"), cn = el("span", "cname"); cn.append(cKey(c), document.createTextNode(cellName(c)), el("small", "", ratLabel(c.rat) + (c.bw ? ` · ${c.bw} MHz` : "") + (c.arfcn != null ? ` · ARFCN ${c.arfcn}` : ""))); nm.appendChild(cn);
+    if (i === 0 && d.cells.length > 1) nm.appendChild(el("span", "badge", "Beste"));
+    if (c.ckey === curKey) nm.appendChild(el("span", "badge on", "aktiv"));
+    if (lockPci != null && String(c.pci) === lockPci) nm.appendChild(el("span", "badge on", "gesperrt"));
+    const sh = el("td"), trk = el("span", "sbar-track"), bar = el("span", "sbar"); trk.style.width = "64px"; bar.style.width = `${Math.max(2, c.share / maxShare * 100)}%`; bar.style.background = cColor(c.color); trk.appendChild(bar);
+    sh.append(trk, document.createTextNode(`${fmt(c.share * 100, c.share < 0.1 ? 1 : 0)} %`)); sh.title = `≈ ${fmtDur(c.secs)}`;
+    const rt = el("td"); rt.appendChild(rateNode(c.level, c.label, c.score)); rt.title = `Stabilität: ${c.stability || "–"} · schwächster Wert: ${({ rsrp: "RSRP", snr: "SINR", rsrq: "RSRQ" })[c.limiting] || "–"}`;
+    rt.appendChild(el("div", "muted", c.stability || "")); rt.lastChild.style.fontSize = "11.5px";
+    const lk = el("td");
+    if (c.lockable && d.can_lock) { const b = el("button", "btn sm", "Sperren"); b.type = "button"; b.title = "Router auf diese Zelle festlegen"; b.onclick = () => lockCell(c); lk.appendChild(b); }
+    row.append(el("td", "tnum", String(i + 1)), nm, sh,
+      el("td", "num", `${fmt(c.rsrp)} dBm`), el("td", "num", `${fmt(c.snr, 1)} dB`), el("td", "num", `${fmt(c.rsrq, 1)} dB`), rt,
+      el("td", "num", bytesStr((c.rx || 0) + (c.tx || 0))), el("td", "num", c.rx_max ? `${fmt(mbit(c.rx_max), 1)} Mbit/s` : "–"),
+      el("td", "", agoFmt(c.last, d.now)), lk);
+    tb.appendChild(row);
+  });
+  t.appendChild(tb); sc.appendChild(t); box.appendChild(sc);
+  box.appendChild(el("p", "note", "„Spitze“ = höchste gemessene Download-Rate in dieser Zelle (zeigt, was die Zelle hergibt). „Daten“ = in dieser Zelle übertragen. Unter der Bewertung steht die Stabilität (Schwankung von RSRP und SINR)."));
+}
+
+/* Zeitleiste: je Zelle eine Spur, farbige Abschnitte = Zeit, in der die Zelle aktiv war */
+const cTimeCard = chartCard($("#c-time"), { title: "Zeitleiste der aktiven Zelle", sub: "Wann war welche Zelle aktiv? · Raute = Sperre geändert", legend: [] });
+const cTimeTip = makeTip(cTimeCard.chart);
+const cTimeSvg = svgEl("svg", { role: "img", "aria-label": "Zeitleiste der aktiven Funkzelle", class: "lanes" }); cTimeCard.chart.appendChild(cTimeSvg);
+new ResizeObserver(() => CE.data && drawTimeline(CE.data)).observe(cTimeCard.chart);
+function renderTimeline(d) {
+  cTimeCard.root.querySelector(".card-h p").textContent = `Wann war welche Zelle aktiv? · ${d.timeline_res === "raw" ? "genau (Rohdaten)" : "vorherrschende Zelle je Stunde"} · Raute = Sperre geändert`;
+  const byKey = Object.fromEntries(d.cells.map((c) => [c.ckey, c]));
+  cTimeCard.setLegend(d.cells.slice().sort((a, b) => (a.color ?? 99) - (b.color ?? 99)).map((c) => ({ label: cellName(c), color: cColor(c.color) })));
+  cTimeCard.fillTable(["Von", "Bis", "Dauer", "Zelle"], d.timeline.slice(-400).reverse().map(([a, b, k]) => [dateFmt.format(new Date(a * 1000)), dateFmt.format(new Date(b * 1000)), fmtDur(b - a), byKey[k] ? cellName(byKey[k]) + (byKey[k].arfcn ? ` / ${byKey[k].arfcn}` : "") : k]));
+  drawTimeline(d);
+}
+function drawTimeline(d) {
+  const svg = cTimeSvg, host = cTimeCard.chart, W = Math.max(280, host.clientWidth);
+  const byKey = Object.fromEntries(d.cells.map((c) => [c.ckey, c]));
+  const lanes = [...new Set(d.timeline.map((s) => s[2]))].sort((a, b) => ((byKey[b] || {}).share || 0) - ((byKey[a] || {}).share || 0));
+  const lh = 26, m = { l: W < 520 ? 100 : 132, r: 14, t: 16, b: 24 }, H = m.t + m.b + Math.max(1, lanes.length) * lh;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.replaceChildren();
+  if (!d.timeline.length) { svgEl("text", { x: W / 2, y: H / 2 + 4, "text-anchor": "middle", class: "empty" }, svg).textContent = "Keine Daten im Zeitraum"; return; }
+  const t0 = d.range === "all" ? d.timeline[0][0] : d.since, t1 = d.until, pw = W - m.l - m.r;
+  const x = (t) => m.l + (Math.min(t1, Math.max(t0, t)) - t0) / (t1 - t0) * pw;
+  const { ticks, step } = timeTicks(t0, t1, Math.max(2, Math.floor(pw / 90)));
+  for (const t of ticks) {
+    svgEl("line", { x1: x(t), x2: x(t), y1: m.t, y2: H - m.b, style: "stroke:var(--grid)" }, svg);
+    const tx = svgEl("text", { x: x(t), y: H - 6, "text-anchor": "middle", class: "tick" }, svg); tx.textContent = tickLabel(t, step, t1 - t0);
+  }
+  lanes.forEach((k, i) => {
+    const c = byKey[k], y = m.t + i * lh;
+    const lab = svgEl("text", { x: m.l - 10, y: y + lh / 2 + 4, "text-anchor": "end", class: "lane" }, svg); lab.textContent = c ? cellName(c) : k.split("|").slice(1, 3).join(" · ");
+    svgEl("rect", { x: m.l, y: y + 3, width: pw, height: lh - 6, rx: 3, style: "fill:var(--wash)" }, svg);
+  });
+  const lockEv = d.events.filter((e) => e.kind === "lock" && e.ts >= t0);
+  for (const [a, b, k] of d.timeline) {
+    const i = lanes.indexOf(k), c = byKey[k], y = m.t + i * lh, xa = x(a), w = Math.max(2, x(b) - xa);
+    const r = svgEl("rect", { x: xa, y: y + 3, width: w, height: lh - 6, class: "seg", style: `fill:${cColor(c ? c.color : null)}` }, svg);
+    r.addEventListener("mousemove", (ev) => {
+      const bb = host.getBoundingClientRect();
+      cTimeTip.show(ev.clientX - bb.left, ev.clientY - bb.top - 60, c ? `${cellName(c)}${c.arfcn ? " · ARFCN " + c.arfcn : ""}` : k, [
+        { name: "Von", value: dateFmt.format(new Date(a * 1000)) }, { name: "Bis", value: dateFmt.format(new Date(b * 1000)) }, { name: "Dauer", value: fmtDur(b - a) },
+        ...(c ? [{ name: "Ø Bewertung im Zeitraum", value: `${c.label} (${fmt(c.score)})` }] : [])]);
+    });
+    r.addEventListener("mouseleave", () => cTimeTip.hide());
+  }
+  for (const e of lockEv) {
+    const xx = x(e.ts), g = svgEl("path", { d: `M${xx} ${m.t - 12}L${xx + 5} ${m.t - 7}L${xx} ${m.t - 2}L${xx - 5} ${m.t - 7}Z`, style: "fill:var(--ink);stroke:var(--surface);stroke-width:1.5" }, svg);
+    svgEl("line", { x1: xx, x2: xx, y1: m.t, y2: H - m.b, style: "stroke:var(--ink);stroke-dasharray:2 3;opacity:.45" }, svg);
+    g.addEventListener("mousemove", (ev) => { const bb = host.getBoundingClientRect(); cTimeTip.show(ev.clientX - bb.left, ev.clientY - bb.top - 40, dateFmt.format(new Date(e.ts * 1000)), [{ name: "Sperre", value: e.detail }]); });
+    g.addEventListener("mouseleave", () => cTimeTip.hide());
+  }
+}
+
+/* Bänder */
+function renderBands(d) {
+  const box = $("#c-bands"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div"); tt.append(el("h2", "", "Bänder im Vergleich"), el("p", "", "Alle Zellen eines Bands zusammengefasst")); head.appendChild(tt); box.appendChild(head);
+  if (!d.bands.length) { box.appendChild(el("p", "note", "Noch keine Daten.")); return; }
+  const sc = el("div", "scroll"), t = el("table"), th = el("thead"), tr = el("tr");
+  ["Band", "Anteil", "Ø RSRP", "Ø SINR", "Bewertung", "Zellen", "Daten"].forEach((c, i) => tr.appendChild(el("th", [0, 1, 4].includes(i) ? "" : "num", c))); th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody"), mx = Math.max(...d.bands.map((b) => b.share));
+  for (const b of d.bands) {
+    const row = el("tr"), sh = el("td"), trk = el("span", "sbar-track"), bar = el("span", "sbar");
+    trk.style.width = "60px"; bar.style.width = `${Math.max(3, b.share / mx * 100)}%`; bar.style.background = "var(--s1)"; trk.appendChild(bar); sh.append(trk, document.createTextNode(`${fmt(b.share * 100, b.share < 0.1 ? 1 : 0)} %`));
+    const rt = el("td"); rt.appendChild(rateNode(b.level, b.label, b.score));
+    const nm = el("td"); nm.append(el("b", "", b.band || "?"), el("span", "muted", ` ${ratLabel(b.rat)}`));
+    row.append(nm, sh, el("td", "num", `${fmt(b.rsrp)} dBm`), el("td", "num", `${fmt(b.snr, 1)} dB`), rt, el("td", "num", String(b.cells)), el("td", "num", bytesStr((b.rx || 0) + (b.tx || 0))));
+    tb.appendChild(row);
+  }
+  t.appendChild(tb); sc.appendChild(t); box.appendChild(sc);
+}
+
+/* Nachbarzellen */
+function renderNeighbors(d) {
+  const box = $("#c-nb"); box.replaceChildren();
+  const head = el("div", "card-h"), tt = el("div");
+  tt.append(el("h2", "", "Zellen in Reichweite"), el("p", "", "Alle Zellen, die der Router gemeldet hat – aktiv, als Zusatzträger oder als Nachbarzelle"));
+  head.appendChild(tt); box.appendChild(head);
+  if (!d.neighbors.length) { box.appendChild(el("p", "note", "Noch keine Zellen erfasst. Nachbarzellen werden bei jeder Signalabfrage mitgeschrieben.")); return; }
+  const sc = el("div", "tablewrap"), t = el("table"), th = el("thead"), tr = el("tr");
+  ["Band", "PCI", "ARFCN", "Rolle", "Jetzt", "Bewertung (wenn genutzt)", ""].forEach((c, i) => tr.appendChild(el("th", [1, 2].includes(i) ? "num" : "", c))); th.appendChild(tr); t.appendChild(th);
+  const tb = el("tbody");
+  const ROLE = { serving: "aktive Zelle", ca: "Zusatzträger", neighbor: "Nachbarzelle" };
+  for (const n of d.neighbors) {
+    const row = el("tr"), rt = el("td");
+    if (n.served) rt.appendChild(rateNode(n.level, n.label, n.score)); else rt.appendChild(el("span", "muted", "noch nicht genutzt"));
+    const lk = el("td");
+    if (n.lockable && d.can_lock) { const b = el("button", "btn sm", "Sperren"); b.type = "button"; b.onclick = () => lockCell(n); lk.appendChild(b); }
+    row.append(el("td", "", `${n.band || "?"} ${ratLabel(n.rat)}`), el("td", "num", String(n.pci)), el("td", "num", String(n.arfcn)),
+      el("td", "", ROLE[n.role] || n.role), el("td", "", n.visible ? "sichtbar" : agoFmt(n.last_seen, d.now)), rt, lk);
+    tb.appendChild(row);
+  }
+  t.appendChild(tb); sc.appendChild(t); box.appendChild(sc);
+  box.appendChild(el("p", "note", "Für Nachbarzellen meldet der Router keine Signalwerte. Eine Bewertung gibt es erst, wenn die Zelle einmal aktiv war – z. B. nach einer kurzen Sperre auf diese Zelle. Das Band wird aus der ARFCN abgeleitet."));
+}
+
+function renderCellEvents(d) {
+  const ul = $("#c-events"); ul.replaceChildren();
+  if (!d.events.length) { ul.appendChild(el("li", "", "Keine Zellwechsel oder Sperren im Zeitraum.")); return; }
+  for (const e of d.events) { const li = el("li"); li.append(el("time", "", dateFmt.format(new Date(e.ts * 1000))), el("span", "badge", C_KIND[e.kind] || e.kind), el("span", "", e.detail)); ul.appendChild(li); }
+}
+
 /* ---------- Seitenwechsel (Hash-Routing) ---------- */
-const PAGES = ["dash", "analysis", "sms", "setup", "settings"];
-const PAGE_TITLE = { dash: "Dashboard", analysis: "Auswertung", sms: "SMS", setup: "Setup", settings: "Einstellungen" };
+const PAGES = ["dash", "analysis", "cells", "sms", "setup", "settings"];
+const PAGE_TITLE = { dash: "Dashboard", analysis: "Auswertung", cells: "Zellen & Bänder", sms: "SMS", setup: "Setup", settings: "Einstellungen" };
 const routeState = { cur: null };
 let lastDash = 0;
 const pageFromHash = () => { const h = location.hash.replace(/^#\/?/, ""); return PAGES.includes(h) ? h : "dash"; };
@@ -2221,6 +2590,7 @@ function showPage(p) {
   if (p === "dash" && Date.now() - lastDash > 20000) { lastDash = Date.now(); reloadAll(); }
   if (p === "analysis") { markA(); if (!A.data || Date.now() - A.loaded > 60000) loadAnalysis(); else renderAnalysis(); }
   if (p === "sms") { SM.flash = null; smsLoad(); }
+  if (p === "cells") cellsLoad(true);
   if (p === "setup") suStart();
   if (p === "settings") loadSettings();
 }
@@ -2236,6 +2606,7 @@ function every(fn, secs) {
 every(tickCurrent, () => uiRefresh);
 every(() => { if (routeState.cur === "dash" && !(zoom && zoom.to < nowSec() - 90)) { lastDash = Date.now(); return loadHistory(); } }, () => Math.max(15, uiRefresh * 6));
 every(() => { if (routeState.cur === "dash" && !zoom) return Promise.all([loadDaily(), loadUsage()]); }, () => Math.max(30, uiRefresh * 12));
+every(() => { if (routeState.cur === "cells" && !CE.busy) return cellsLoad(false); }, () => Math.max(15, uiRefresh * 3));
 every(() => { if (routeState.cur === "sms" && (SM.tab === "in" || SM.tab === "out") && !(document.activeElement && document.activeElement.id === "sms-q")) return smsLoad(); }, () => Math.max(5, uiRefresh * 2));
 
 tickCurrent();
