@@ -469,7 +469,6 @@ td .badge { margin-left: 6px; font-size: 11px; }
       <div class="sv tnum" id="fc-val">–</div>
       <div class="meter two" id="fc-bar" role="img" aria-label="Bisheriger Verbrauch und Prognose"></div>
       <div class="note" id="fc-note" style="margin-top:4px"></div>
-      <div class="note muted" id="fc-lin" style="margin-top:2px"></div>
     </div>
   </div>
   <div class="card c7" id="card-daily"></div>
@@ -1323,7 +1322,6 @@ function renderForecast(d) {
   if (fc.quality === "grob") parts.push("grobe Schätzung, wird mit jedem Tag genauer");
   if (fc.limit_reached_on) parts.push(`Limit voraussichtlich am ${new Date(fc.limit_reached_on + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} erreicht`);
   $("#fc-note").textContent = parts.join(" · ");
-  $("#fc-lin").textContent = `Zum Vergleich linear hochgerechnet: ${bytesStr(fc.linear)}`;
 }
 
 
@@ -2288,7 +2286,9 @@ async function cellsLoad(full) {
     renderCellsNow(d);
     // Die Sperr-Karte nur neu aufbauen, wenn sich am Zustand etwas geändert hat - sonst gingen Eingaben (Häkchen, Auswahl) verloren
     const sig = JSON.stringify([d.lock, d.guard && d.guard.active, d.can_lock, full]);
-    if (!CE.busy && (full || sig !== CE.lockSig)) { CE.lockSig = sig; renderLock(d); }
+    // … und nicht, während darin gerade etwas ausgewählt wird (ein geöffnetes Auswahlfeld würde sonst zugehen)
+    const editing = !full && $("#c-lock").contains(document.activeElement) && document.activeElement !== document.body;
+    if (!CE.busy && !editing && (full || sig !== CE.lockSig)) { CE.lockSig = sig; renderLock(d); }
     renderRank(d); renderTimeline(d); renderBands(d); renderNeighbors(d); renderCellEvents(d);
     CE.loadedRange = CE.range;
     $("#c-info").textContent = d.total_n ? `${fmt(d.cells.length)} Zellen · ${fmt(d.total_n)} Messpunkte im Zeitraum` : "Noch keine Messwerte im Zeitraum";
@@ -2406,8 +2406,9 @@ function renderLock(d) {
   go.onclick = async () => {
     const body = { mode: CE.mode, fallback_s: Number(fb.value), ...collect() };
     const what = CE.mode === "auto" ? "alle Sperren aufheben" : CE.mode === "nr_cell" ? `auf Zelle PCI ${body.pci} / ARFCN ${body.arfcn} sperren` : `nur ${body.bands.map((b) => (CE.mode === "sa_bands" ? "n" : "B") + b).join(", ")} erlauben`;
-    if (!confirm(`Router ${what}?\n\nDie Mobilfunkverbindung ist dabei kurz (ca. 10–60 s) unterbrochen.`)) return;
-    CE.busy = true; go.disabled = true; go.textContent = "Wird übertragen …"; out.replaceChildren(el("p", "note", "Befehl wird gesendet und geprüft – das dauert einige Sekunden …"));
+    const extra = CE.mode === "nr_cell" ? "\n\nDamit das Modem auf die Zelle wechselt, meldet das Dashboard es danach neu im Netz an. Das kann bis zu 2 Minuten dauern." : "";
+    if (!confirm(`Router ${what}?\n\nDie Mobilfunkverbindung ist dabei kurz (ca. 10–60 s) unterbrochen.${extra}`)) return;
+    CE.busy = true; go.disabled = true; go.textContent = "Wird übertragen …"; out.replaceChildren(el("p", "note", CE.mode === "nr_cell" ? "Sperre wird gesetzt, danach meldet sich das Modem neu an und wechselt auf die Zelle – das dauert bis zu 2 Minuten …" : "Befehl wird gesendet und geprüft – das dauert einige Sekunden …"));
     try { const r = await api("POST", "/api/cells/lock", body); CE.result = r; if (r.ok && CE.mode === "auto") CE.mode = "auto"; }
     catch (e) { CE.result = { ok: false, detail: e.message, steps: [] }; }
     CE.busy = false; CE.data && (CE.data.lock = CE.result.lock || CE.data.lock);
@@ -2429,7 +2430,9 @@ function renderLock(d) {
   };
 }
 function showLockResult(box, r) {
-  const line = el("div", "okline"); line.append(suIcon(r.ok ? "good" : "bad"), el("b", "", r.ok ? "Übernommen" : "Nicht übernommen"), document.createTextNode(" – " + (r.ok ? (r.desc || "") : r.detail)));
+  const half = r.ok && r.on_target === false;       // Sperre gesetzt, Modem aber nicht in der Zelle
+  const line = el("div", "okline"); line.append(suIcon(half ? "poor" : r.ok ? "good" : "bad"), el("b", "", half ? "Gesperrt, aber nicht verbunden" : r.ok ? "Übernommen" : "Nicht übernommen"),
+    document.createTextNode(" – " + (half ? r.detail : r.ok ? (r.desc || "") + (r.on_target ? " · mit der Zelle verbunden" : "") : r.detail)));
   box.appendChild(line);
   if ((r.steps || []).length) {
     const det = el("details", "help"), sm = el("summary", "", "Details"); det.appendChild(sm);

@@ -174,6 +174,10 @@ In der Rangliste und der Nachbarliste setzt „Sperren“ die Zelle direkt ins F
   erst eine sichtbare Änderung gilt als übernommen.
 - **Sicherheitsnetz:** Findet der Router mit der Sperre länger kein Netz (einstellbar 1–10 min, Standard 3 min), stellt das Dashboard
   automatisch auf Automatik zurück und trägt das in die Ereignisse ein.
+- **Wechsel auf die gesperrte Zelle:** Der Router speichert die Zellsperre sofort, das Modem bleibt aber in der bisherigen Zelle,
+  bis es sich neu im Netz anmeldet. Ist es nach dem Setzen nicht in der Zelle, meldet das Dashboard es neu an (Netzwerkmodus kurz
+  umschalten wie beim Neustart der Verbindung) und prüft danach, ob die gesperrte Zelle aktiv ist. Eine 5G-Zellsperre greift nur bei
+  5G Standalone (SA); im NSA- oder LTE-Modus weist das Ergebnis darauf hin.
 - Beim Umschalten ist die Verbindung kurz (ca. 10–60 s) weg.
 - **Noch nicht an einem echten G5TS geprüft** (nur mit dem Mock-Router). Vor dem ersten Einsatz einmal
   `python zte_dash.py --probe-lock` ausführen – das ändert nichts, zeigt aber die Sperr-Befehle samt Argumenten und den aktuellen Zustand.
@@ -244,8 +248,8 @@ Beim Zoomen zeigt es den gewählten Ausschnitt und wählt bei Bedarf automatisch
 ## Prognose Periodenende
 
 Grundlage ist der Monatszähler des Routers. Schätzung = bisher verbraucht (ohne heute) + max(heute, Tagesschnitt) + Tagesschnitt × verbleibende Tage.
-Tagesschnitt = Mittel der letzten bis zu 7 vollständigen Tage. Angezeigt werden Spanne (25./75. Perzentil), Güte (gut/mittel/grob)
-und zum Vergleich die lineare Hochrechnung.
+Tagesschnitt = Mittel der letzten bis zu 7 vollständigen Tage. Angezeigt werden Spanne (25./75. Perzentil) und Güte (gut/mittel/grob).
+Solange weniger als 2 Tage Verlauf vorliegen, wird linear hochgerechnet.
 
 ## Datenhaltung – es wird nichts gelöscht
 

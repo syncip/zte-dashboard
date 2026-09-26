@@ -52,6 +52,9 @@ def init_counters():
 SA_ALL = "1,3,8,28,41,77,78,7,20,38,40,75"
 LTE_ALL = "0x7a0880800c5"
 LOCK = {"sa": SA_ALL, "lte": LTE_ALL, "nr_cell": "0,0,0", "lte_cell": "0,0"}
+# Wie beim echten Router: Eine neue Zellsperre wird sofort gemeldet, das Modem wechselt aber erst bei der nächsten
+# Neuanmeldung im Netz (Netzwerkmodus umschalten) auf die Zelle. nr_cell_eff = die Sperre, nach der das Modem gerade arbeitet.
+LOCK["nr_cell_eff"] = LOCK["nr_cell"]
 # Zellen, die der Mock als aktive Zelle kennt: (pci, arfcn) -> (band, bandbreite, RSRP-Versatz)
 MOCK_CELLS = {(768, 641760): ("n78", 90, 0), (115, 641760): ("n78", 90, -4), (970, 641760): ("n78", 90, -9),
               (870, 431070): ("n1", 20, -9)}
@@ -180,10 +183,10 @@ def profile(t, live=False):
     if seg == 9:
         net, band, rsrp = "LTE", "B3", None
         lte = -99 + 4 * slow + r.gauss(0, 1.8)
-    if live and (LOCK["nr_cell"] != "0,0,0" or LOCK["sa"] != SA_ALL):   # Sperre (nur im Live-Mock, nicht in den Demodaten)
+    if live and (LOCK["nr_cell_eff"] != "0,0,0" or LOCK["sa"] != SA_ALL):   # Sperre (nur im Live-Mock, nicht in den Demodaten)
         want = None
-        if LOCK["nr_cell"] != "0,0,0":
-            f = LOCK["nr_cell"].split(",")
+        if LOCK["nr_cell_eff"] != "0,0,0":
+            f = LOCK["nr_cell_eff"].split(",")
             want = MOCK_CELLS.get((int(f[0]), int(f[1])))
             if not want:                                       # Zelle gibt es hier nicht -> kein Netz
                 return {"net": "", "band": "", "pci": None, "arfcn": None, "bw": None, "rsrp": None, "lte": None,
@@ -339,6 +342,7 @@ class Handler(BaseHTTPRequestHandler):
                 return denied
             STATE["select"] = args.get("net_select", "4G_AND_5G")
             STATE["reg_until"] = time.time() + 5
+            LOCK["nr_cell_eff"] = LOCK["nr_cell"]              # Neuanmeldung: jetzt gilt die gespeicherte Zellsperre
             STATE["log"].append(STATE["select"])
             print("set_netselect ->", STATE["select"], flush=True)
             return {"result": [0, {}]}
@@ -350,7 +354,7 @@ class Handler(BaseHTTPRequestHandler):
                 print(method, "-> INVALID ARGUMENT", args, flush=True)
                 return {"result": [2]}
             if method == "nwinfo_reset_band_cell_setting":
-                LOCK.update(sa=SA_ALL, lte=LTE_ALL, nr_cell="0,0,0", lte_cell="0,0")
+                LOCK.update(sa=SA_ALL, lte=LTE_ALL, nr_cell="0,0,0", lte_cell="0,0", nr_cell_eff="0,0,0")
             elif method == "nwinfo_set_sa_bandlock":
                 LOCK["sa"] = args["nr5g_sa_band_lock"]
             elif method == "nwinfo_set_lte_ext_band":
@@ -359,7 +363,8 @@ class Handler(BaseHTTPRequestHandler):
                 LOCK["nr_cell"] = f'{args["lock_nr_pci"]},{args["lock_nr_earfcn"]},{args["lock_nr_cell_band"]}'
             elif method == "nwinfo_lock_lte_cell":
                 LOCK["lte_cell"] = f'{args["lock_lte_pci"]},{args["lock_lte_earfcn"]}'
-            STATE["reg_until"] = time.time() + 4
+            if method != "nwinfo_lock_nr_cell":
+                STATE["reg_until"] = time.time() + 4
             print(method, "->", args, "| Sperre jetzt", LOCK, flush=True)
             return {"result": [0, {"result": "success"}]}
         if (obj, method) == ("zwrt_data", "get_wwandst"):
