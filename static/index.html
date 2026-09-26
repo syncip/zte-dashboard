@@ -997,7 +997,7 @@ const cards = {
   snr: chartCard($("#card-snr"), { title: "Signalrauschabstand (SINR)", sub: "Höher ist besser · ab 13 dB gut", legend: LEG_NR, marks: true }),
   rsrq: chartCard($("#card-rsrq"), { title: "Signalqualität (RSRQ)", sub: "Höher (näher an 0) ist besser", legend: LEG_NR, marks: true }),
   daily: chartCard($("#card-daily"), { title: "Verbrauchsverlauf", sub: "Tagesverbrauch", legend: LEG_DU }),
-  speed: chartCard($("#card-speed"), { title: "Durchsatz", sub: "Momentane Datenrate in Mbit/s (Mittelwert je Zeitfenster)", legend: LEG_DU, marks: true }),
+  speed: chartCard($("#card-speed"), { title: "Durchsatz", sub: "Datenrate in Mbit/s aus dem Verbrauch je Abfrageintervall (Mittelwert je Zeitfenster)", legend: LEG_DU, marks: true }),
 };
 const ZOOM = { onZoom: (a, b) => setZoom(a, b), onReset: () => zoomReset() };
 const charts = {
@@ -1143,8 +1143,8 @@ function renderUsage(c) {
 }
 function renderSpeedHead(c) {
   const u = c.usage; const sub = $("#card-speed .card-h p");
-  if (u && u.rx_speed != null && c.now - u.ts < 120) sub.textContent = `Aktuell ↓ ${fmt(mbit(u.rx_speed), 1)} · ↑ ${fmt(mbit(u.tx_speed), 1)} Mbit/s · Mittelwert je Zeitfenster`;
-  else sub.textContent = "Momentane Datenrate in Mbit/s (Mittelwert je Zeitfenster)";
+  if (u && u.rx_speed != null && c.now - u.ts < 120) sub.textContent = `Aktuell ↓ ${fmt(mbit(u.rx_speed), 1)} · ↑ ${fmt(mbit(u.tx_speed), 1)} Mbit/s (Ø der letzten ${c.config.usage} s) · Mittelwert je Zeitfenster`;
+  else sub.textContent = "Datenrate in Mbit/s aus dem Verbrauch je Abfrageintervall (Mittelwert je Zeitfenster)";
 }
 
 /* ---------- Verlauf ---------- */
@@ -1266,7 +1266,7 @@ function renderForecast(d) {
   if (fc.quality === "grob") parts.push("grobe Schätzung, wird mit jedem Tag genauer");
   if (fc.limit_reached_on) parts.push(`Limit voraussichtlich am ${new Date(fc.limit_reached_on + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" })} erreicht`);
   $("#fc-note").textContent = parts.join(" · ");
-  $("#fc-lin").textContent = `Zum Vergleich linear hochgerechnet (wie vnStat): ${bytesStr(fc.linear)}`;
+  $("#fc-lin").textContent = `Zum Vergleich linear hochgerechnet: ${bytesStr(fc.linear)}`;
 }
 
 
@@ -1387,7 +1387,7 @@ function buildSettings(r) {
   // 2. Abfrage & Aktualisierung
   const c2 = setCard("Abfrage & Aktualisierung", "Wie oft gemessen und angezeigt wird – gilt sofort, ohne Neustart");
   f.g.poll_s = numIn(g.poll_s, 2, 3600); c2.appendChild(frow("Signal abfragen (Sekunden)", f.g.poll_s, "Alle so viele Sekunden werden Signalwerte gespeichert. Kürzer = feinere Diagramme, aber mehr Daten (mind. 2)."));
-  f.g.usage_s = numIn(g.usage_s, 10, 3600); c2.appendChild(frow("Datenverbrauch abfragen (Sekunden)", f.g.usage_s, "Braucht das Router-Passwort. Nie kürzer als das Signalintervall."));
+  f.g.usage_s = numIn(g.usage_s, 2, 3600); c2.appendChild(frow("Datenverbrauch abfragen (Sekunden)", f.g.usage_s, "Braucht das Router-Passwort. Alle so viele Sekunden wird der Traffic-Zähler ausgelesen; die Geschwindigkeit ist der Verbrauch seit der letzten Abfrage geteilt durch die vergangene Zeit. Kürzer = feinere Kurve (mind. 2)."));
   f.g.ui_refresh_s = numIn(g.ui_refresh_s, 2, 300); c2.appendChild(frow("Anzeige aktualisieren (Sekunden)", f.g.ui_refresh_s, "Wie oft sich diese Oberfläche neue Werte holt. Diagramme laden seltener nach."));
   f.g.raw_days = numIn(g.raw_days, 7, 3650); c2.appendChild(frow("Rohdaten aufbewahren (Tage)", f.g.raw_days, "Danach bleiben Stundenwerte dauerhaft erhalten – es wird nichts endgültig gelöscht."));
   body.appendChild(c2);

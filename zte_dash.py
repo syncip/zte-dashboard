@@ -65,7 +65,7 @@ class Config:
         self.session = _env("SESSION", "")            # optional: manuelle ubus-Session-ID
         self.login_mode = _env("LOGIN_MODE", "salted")  # salted | sha
         self.poll = max(2, int(_env("POLL_SECONDS", "10")))
-        self.usage_s = max(10, int(_env("USAGE_SECONDS", "30")))
+        self.usage_s = max(2, int(_env("USAGE_SECONDS", "10")))
         self.ui_refresh = 5
         self.db = _env("DB", str(BASE_DIR / "data" / "zte.db"))
         self.bind = _env("BIND", "0.0.0.0")
@@ -82,7 +82,7 @@ class Config:
 
     @property
     def usage_every(self):
-        return max(self.poll, self.usage_s)
+        return self.usage_s
 
 
 # --------------------------------------------------------------------------- #
@@ -312,7 +312,7 @@ def sanitize_settings(raw, strict=False):
 
 
 HOST_URL_RE = re.compile(r"^https?://[A-Za-z0-9](?:[A-Za-z0-9.\-]{0,251}[A-Za-z0-9])?(?::\d{1,5})?$")
-GENERAL_LIMITS = {"poll_s": (2, 3600), "usage_s": (10, 3600), "raw_days": (7, 3650), "billing_day": (1, 28),
+GENERAL_LIMITS = {"poll_s": (2, 3600), "usage_s": (2, 3600), "raw_days": (7, 3650), "billing_day": (1, 28),
                   "ui_refresh_s": (2, 300)}
 
 
@@ -1407,6 +1407,7 @@ class Collector(threading.Thread):
         self.status = {"started": int(time.time()), "online": None, "last_ok": None, "last_error": None,
                        "usage_ok": None, "usage_error": None, "usage_last_ok": None}
         self._last_usage = 0.0
+        self._last_signal = 0.0
         self._last_maint = 0.0
 
     def snapshot_status(self):
@@ -1422,25 +1423,31 @@ class Collector(threading.Thread):
             self.status.update(kw)
 
     def run(self):
+        # Signal und Datenverbrauch haben getrennte Takte; geschlafen wird bis zur nächsten fälligen Abfrage.
         while not self.stop_flag.is_set():
-            started = time.time()
             try:
                 self.poll_once()
             except Exception:  # noqa: BLE001 - der Loop darf nie sterben
                 log.exception("Unerwarteter Fehler im Poll-Loop")
-            self.wake.wait(max(0.5, self.cfg.poll - (time.time() - started)))
+            due = self._last_signal + self.cfg.poll
+            if self.router.can_login:
+                due = min(due, self._last_usage + self.cfg.usage_every)
+            self.wake.wait(max(0.2, due - time.time()))
             self.wake.clear()
 
     def request_usage_now(self):
         self._last_usage = 0.0
 
     def poll_once(self):
-        ts = int(time.time())
+        now = time.time()
+        ts = int(now)
         conn = connect(self.cfg.db)
         try:
-            self._poll_signal(conn, ts)
-            if self.router.can_login and time.time() - self._last_usage >= self.cfg.usage_every:
-                self._last_usage = time.time()
+            if now - self._last_signal >= self.cfg.poll - 0.05:
+                self._last_signal = now
+                self._poll_signal(conn, ts)
+            if self.router.can_login and now - self._last_usage >= self.cfg.usage_every - 0.05:
+                self._last_usage = now
                 self._poll_usage(conn, ts)
             if time.time() - self._last_maint > 600:
                 self._last_maint = time.time()
@@ -1507,19 +1514,26 @@ class Collector(threading.Thread):
                 add_event(conn, ts, "usage", f"Datenverbrauch nicht abrufbar: {exc}")
             self._set(usage_ok=False, usage_error=str(exc))
             return
+        t_read = time.time()                          # genauer Zeitpunkt der Zählerablesung (für die Datenrate)
         u = parse_usage(raw)
         last = kv_get(conn, "last_usage") or {}
-        dt = max(1, ts - last.get("ts", ts)) if last else None
         # Bevorzugt den Monatszähler (überlebt Reconnects), sonst den Sitzungszähler
         if u["rx_month"] is not None or u["tx_month"] is not None:
-            rx_d = counter_delta(u["rx_month"], last.get("rx_month"))
-            tx_d = counter_delta(u["tx_month"], last.get("tx_month"))
+            keys = ("rx_month", "tx_month")
         else:
-            rx_d = counter_delta(u["rx_total"], last.get("rx_total"))
-            tx_d = counter_delta(u["tx_total"], last.get("tx_total"))
-        rx_speed, tx_speed = u["rx_speed"], u["tx_speed"]
-        if rx_speed is None and dt:
-            rx_speed, tx_speed = rx_d / dt, tx_d / dt
+            keys = ("rx_total", "tx_total")
+        rx_d = counter_delta(u[keys[0]], last.get(keys[0]))
+        tx_d = counter_delta(u[keys[1]], last.get(keys[1]))
+        # Datenrate = übertragene Bytes seit der letzten Ablesung / vergangene Zeit. Die Momentanwerte des Routers
+        # werden bewusst nicht verwendet: sie sind nur Stichproben und schwanken stark.
+        rx_speed = tx_speed = None
+        t_prev = last.get("t", last.get("ts"))
+        if last and t_prev is not None and None not in (u[keys[0]], last.get(keys[0])):
+            dt = t_read - t_prev
+            reset = u[keys[0]] < last[keys[0]] or (u[keys[1]] or 0) < (last.get(keys[1]) or 0)
+            # nach einem Zählerreset oder einer langen Lücke (z. B. Neustart des Dashboards) ist keine Rate bestimmbar
+            if 0.5 <= dt <= max(300, 5 * self.cfg.usage_every) and not reset:
+                rx_speed, tx_speed = rx_d / dt, tx_d / dt
         conn.execute("INSERT OR REPLACE INTO traffic VALUES(?,?,?,?,?,?,?,?,?)",
                      (ts, u["rx_total"], u["tx_total"], u["rx_month"], u["tx_month"], rx_speed, tx_speed, rx_d, tx_d))
         if not last and u["rx_day"] is not None:      # erster Abruf: bisherigen Tagesverbrauch vom Router übernehmen
@@ -1529,7 +1543,7 @@ class Collector(threading.Thread):
             day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
             conn.execute("INSERT INTO daily(day,rx,tx) VALUES(?,?,?) ON CONFLICT(day) DO UPDATE SET "
                          "rx=rx+excluded.rx, tx=tx+excluded.tx", (day, rx_d, tx_d))
-        kv_set(conn, "last_usage", {"ts": ts, **{k: u[k] for k in ("rx_total", "tx_total", "rx_month", "tx_month")}})
+        kv_set(conn, "last_usage", {"ts": ts, "t": t_read, **{k: u[k] for k in ("rx_total", "tx_total", "rx_month", "tx_month")}})
         if self.status["usage_ok"] is False:
             add_event(conn, ts, "usage", "Datenverbrauch wieder verfügbar")
         self._set(usage_ok=True, usage_error=None, usage_last_ok=ts)
@@ -2616,7 +2630,7 @@ class Api:
         """Prognose des Verbrauchs zum Periodenende.
         Basis: Durchschnitt der letzten (bis zu 7) vollständigen Tage mit Daten - unabhängig von der Periodengrenze,
         weil sich Nutzungsgewohnheiten nicht am Monatsersten ändern. Heute zählt mindestens den Durchschnitt.
-        Mit weniger als 2 Tagen Historie: linear hochgerechnet wie vnStat (bisher / vergangene Zeit x Periodenlänge)."""
+        Mit weniger als 2 Tagen Historie: linear hochgerechnet (bisher / vergangene Zeit x Periodenlänge)."""
         total_days = (nxt - bs).days
         now = datetime.now()
         frac_today = (now.hour * 3600 + now.minute * 60 + now.second) / 86400
