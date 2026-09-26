@@ -2261,7 +2261,7 @@ function smsRenderApi(box) {
 /* ---------- Zellen & Bänder ---------- */
 const CE = {
   range: (() => { try { return localStorage.getItem("zte-c-range") || "7d"; } catch { return "7d"; } })(),
-  data: null, busy: false, mode: null, result: null, cellForm: null, loadedRange: null,
+  data: null, busy: false, mode: null, result: null, cellForm: null, loadedRange: null, lockSig: null, bandSel: {}, cellSel: "",
 };
 const C_KIND = { cell: "Zellwechsel", lock: "Sperre" };
 const cColor = (i) => (i == null || i > 7 ? "var(--muted)" : `var(--c${i + 1})`);
@@ -2286,7 +2286,9 @@ async function cellsLoad(full) {
     const d = await getJSON(`/api/cells?range=${CE.range}`);
     CE.data = d; $("#c-banner").hidden = true;
     renderCellsNow(d);
-    if (!CE.busy) renderLock(d);
+    // Die Sperr-Karte nur neu aufbauen, wenn sich am Zustand etwas geändert hat - sonst gingen Eingaben (Häkchen, Auswahl) verloren
+    const sig = JSON.stringify([d.lock, d.guard && d.guard.active, d.can_lock, full]);
+    if (!CE.busy && (full || sig !== CE.lockSig)) { CE.lockSig = sig; renderLock(d); }
     renderRank(d); renderTimeline(d); renderBands(d); renderNeighbors(d); renderCellEvents(d);
     CE.loadedRange = CE.range;
     $("#c-info").textContent = d.total_n ? `${fmt(d.cells.length)} Zellen · ${fmt(d.total_n)} Messpunkte im Zeitraum` : "Noch keine Messwerte im Zeitraum";
@@ -2349,6 +2351,7 @@ function renderLock(d) {
   if (!CE.mode) CE.mode = L.nr_cell ? "nr_cell" : L.sa_locked ? "sa_bands" : L.lte_locked ? "lte_bands" : "auto";
   const segm = el("div", "seg"); segm.setAttribute("aria-label", "Art der Sperre");
   for (const [k, lab] of modes) { const b = el("button", "", lab); b.type = "button"; b.setAttribute("aria-pressed", CE.mode === k); b.onclick = () => { CE.mode = k; CE.result = null; renderLock(CE.data); }; segm.appendChild(b); }
+  if (CE.lastLockTs !== (d.last_lock && d.last_lock.ts)) { CE.lastLockTs = d.last_lock && d.last_lock.ts; CE.bandSel = {}; CE.cellSel = ""; }
   const panel = el("div", "lockpanel"); box.append(segm, panel);
 
   let collect = () => ({});
@@ -2362,7 +2365,9 @@ function renderLock(d) {
     const chips = el("div", "chips");
     for (const b of sup) {
       const name = (sa ? "n" : "B") + b, lab = el("label", "chip"), cb = el("input"); cb.type = "checkbox"; cb.value = b;
-      cb.checked = cur.includes(b) || !cur.length;
+      const kept = CE.bandSel[CE.mode];
+      cb.checked = kept ? kept.includes(b) : (cur.includes(b) || !cur.length);
+      cb.onchange = () => { CE.bandSel[CE.mode] = [...chips.querySelectorAll("input:checked")].map((x) => Number(x.value)); };
       lab.append(cb, document.createTextNode(name)); if (used.has(name)) lab.appendChild(el("span", "cur", "genutzt"));
       chips.appendChild(lab);
     }
@@ -2376,13 +2381,14 @@ function renderLock(d) {
     for (const c of d.cells.filter((x) => x.lockable)) opts.push({ pci: c.pci, arfcn: c.arfcn, band: c.band, txt: `${c.band} · PCI ${c.pci} · ARFCN ${c.arfcn} – ${c.label} (${fmt(c.score)}), ${fmt(c.share * 100, 0)} % der Zeit` });
     for (const n of d.neighbors.filter((x) => x.lockable && x.rat === "NR" && !x.served)) opts.push({ pci: n.pci, arfcn: n.arfcn, band: n.band, txt: `${n.band || "?"} · PCI ${n.pci} · ARFCN ${n.arfcn} – Nachbarzelle, noch nicht genutzt` });
     opts.forEach((o, i) => sel.appendChild(new Option(o.txt, String(i))));
+    sel.value = CE.cellSel || "";
     const f = CE.cellForm || (L.nr_cell ? { pci: L.nr_cell.parts[0], arfcn: L.nr_cell.parts[1], band: L.nr_cell.parts[2] ? "n" + L.nr_cell.parts[2].replace(/^n/, "") : "", scs: "" } : { pci: "", arfcn: "", band: "", scs: "" });
     const form = el("div", "cellform");
     const inp = (lab, key, ph) => { const l = el("label", "", lab), i = el("input"); i.type = "text"; i.inputMode = key === "band" ? "text" : "numeric"; i.placeholder = ph; i.value = f[key] ?? ""; i.oninput = () => { CE.cellForm = { ...readForm() }; }; l.appendChild(i); form.appendChild(l); return i; };
     const iP = inp("PCI", "pci", "z. B. 768"), iA = inp("ARFCN", "arfcn", "z. B. 641760"), iB = inp("Band", "band", "automatisch");
     const lS = el("label", "", "SCS"), iS = el("select"); for (const [v, t] of [["", "automatisch"], ["15", "15 kHz"], ["30", "30 kHz"]]) iS.appendChild(new Option(t, v)); iS.value = f.scs || ""; lS.appendChild(iS); form.appendChild(lS);
     const readForm = () => ({ pci: iP.value.trim(), arfcn: iA.value.trim(), band: iB.value.trim(), scs: iS.value });
-    sel.onchange = () => { const o = opts[Number(sel.value)]; if (!o) return; iP.value = o.pci; iA.value = o.arfcn; iB.value = o.band || ""; iS.value = ""; CE.cellForm = readForm(); };
+    sel.onchange = () => { CE.cellSel = sel.value; const o = opts[Number(sel.value)]; if (!o) return; iP.value = o.pci; iA.value = o.arfcn; iB.value = o.band || ""; iS.value = ""; CE.cellForm = readForm(); };
     panel.append(sel, form, el("p", "hint", "SCS (Unterträgerabstand) wird aus dem Band abgeleitet: n78/n77/n41/n40/n38 → 30 kHz, sonst 15 kHz."));
     collect = () => { const r = readForm(); return { pci: r.pci, arfcn: r.arfcn, band: r.band || undefined, scs: r.scs || undefined }; };
   }
@@ -2432,7 +2438,7 @@ function showLockResult(box, r) {
   }
 }
 function lockCell(c) {
-  CE.mode = "nr_cell"; CE.result = null; CE.cellForm = { pci: String(c.pci), arfcn: String(c.arfcn), band: c.band || "", scs: "" };
+  CE.mode = "nr_cell"; CE.result = null; CE.cellSel = ""; CE.cellForm = { pci: String(c.pci), arfcn: String(c.arfcn), band: c.band || "", scs: "" };
   renderLock(CE.data); $("#c-lock").scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
