@@ -3561,6 +3561,8 @@ class Api:
         try:
             try:
                 res = col.router.reset_locks(sa_sup) if mode == "auto" else col.router.apply_lock(mode, p)
+                if res["ok"] and mode == "nr_cell":
+                    res = self._join_locked_cell(col.router, p, res)
             except RouterError as exc:
                 res = {"ok": False, "detail": str(exc), "steps": [], "args": None}
             ts = int(time.time())
@@ -3584,6 +3586,61 @@ class Api:
         finally:
             col.lock_busy.release()
         return {**res, "desc": desc, **{k: v for k, v in self.cells("24h").items() if k in ("lock", "guard", "last_lock", "current")}}
+
+    def _pending_netselect(self, v):
+        """Merkt den ursprünglichen Netzwerkmodus, damit er nach einem Abbruch beim nächsten Start wiederhergestellt wird."""
+        c = connect(self.cfg.db)
+        try:
+            kv_set(c, "pending_netselect", v) if v else kv_del(c, "pending_netselect")
+            c.commit()
+        finally:
+            c.close()
+
+    def _join_locked_cell(self, router, p, res):
+        """Nach dem Setzen der Zellsperre auf die Zelle wechseln. Der Router speichert die Sperre sofort, das Modem bleibt
+        aber meist in der bisherigen Zelle, bis es sich neu im Netz anmeldet. Deshalb wird - falls nötig - der Netzwerkmodus
+        kurz umgeschaltet (wie beim Neustart der Verbindung) und danach geprüft, ob die gesperrte Zelle aktiv ist."""
+        steps = list(res.get("steps") or [])
+        last = {}
+
+        def on_target():
+            try:
+                last["d"] = router.netinfo()
+            except RouterError:
+                return False
+            s = parse_sample(int(time.time()), last["d"])
+            return s["pci"] == p["pci"] and s["arfcn"] == p["arfcn"]
+
+        def done(ok, detail):
+            return {**res, "steps": steps, "on_target": ok, "detail": detail}
+
+        for _ in range(4):
+            if on_target():
+                steps.append({"ok": True, "text": "Modem ist mit der gesperrten Zelle verbunden"})
+                return done(True, "vom Router übernommen, mit der Zelle verbunden")
+            time.sleep(2)
+        steps.append({"ok": True, "text": "Modem noch in der bisherigen Zelle - Neuanmeldung im Netz (Netzwerkmodus kurz umschalten)"})
+        try:
+            rc = perform_reconnect(router, grace_s=90, on_pending=self._pending_netselect)
+        except RouterError as exc:
+            rc = {"ok": False, "detail": str(exc)}
+        steps.append({"ok": rc["ok"], "text": f"Neuanmeldung: {rc['detail']}"})
+        deadline = time.time() + (45 if rc["ok"] else 5)
+        while time.time() < deadline:
+            if on_target():
+                steps.append({"ok": True, "text": "Modem ist mit der gesperrten Zelle verbunden"})
+                return done(True, "vom Router übernommen, nach Neuanmeldung mit der Zelle verbunden")
+            time.sleep(3)
+        nt = str((last.get("d") or {}).get("network_type") or "").upper()
+        if nt and ("NSA" in nt or "ENDC" in nt or "LTE" in nt or "SA" not in nt):
+            hint = (f"Der Router ist gerade im Modus {nt}. Eine 5G-Zellsperre greift nur bei 5G Standalone (SA) – "
+                    "ggf. zusätzlich das Band unter „5G-Bänder“ sperren oder den Netzwerkmodus in der Router-Oberfläche auf 5G SA stellen.")
+        elif not nt:
+            hint = "Das Modem hat gerade kein Netz – vermutlich ist die Zelle von hier aus nicht erreichbar."
+        else:
+            hint = "Vermutlich ist die Zelle von hier aus zu schwach oder nicht erreichbar (Nachbarzellen meldet der Router ohne Messwerte)."
+        steps.append({"ok": False, "text": "Gesperrte Zelle nach der Neuanmeldung nicht aktiv"})
+        return done(False, "Sperre gesetzt, der Router ist aber (noch) nicht mit dieser Zelle verbunden. " + hint)
 
     def cells_methods(self):
         """Diagnose: welche Sperr-Methoden und Argumente meldet der Router?"""
