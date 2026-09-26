@@ -163,12 +163,14 @@ Beim ersten Start mit dieser Version werden vorhandene Daten automatisch überno
 
 ### Sperre setzen
 
-Unter **Band- und Zellsperre**: **Automatik** · **5G-Bänder** (SA) · **LTE-Bänder** · **5G-Zelle** (PCI + ARFCN, Band und SCS werden abgeleitet).
+Unter **Band- und Zellsperre**: **Automatik** · **5G-Bänder** (SA) · **LTE-Bänder** · **5G-Zelle** (PCI + ARFCN, das Band wird abgeleitet).
 In der Rangliste und der Nachbarliste setzt „Sperren“ die Zelle direkt ins Formular. Braucht das Router-Passwort.
 
 - Die Befehle stecken in der Firmware (`zte_nwinfo_api`: `nwinfo_set_sa_bandlock`, `nwinfo_lock_nr_cell`, `nwinfo_set_lte_ext_band`,
-  `nwinfo_reset_band_cell_setting`), die Router-Oberfläche zeigt sie aber nicht an. Die Argumentnamen fragt das Dashboard per ubus `list` ab;
-  liefert der Router keine Liste, werden bekannte Schreibweisen probiert. **Jede Änderung wird danach über `nwinfo_get_netinfo` geprüft** –
+  `nwinfo_reset_band_cell_setting`), die Router-Oberfläche zeigt sie aber nicht an. Die Zellsperre nutzt dieselben Argumente wie die
+  Weboberfläche der G5-Serie: `nwinfo_lock_nr_cell` mit `lock_nr_pci`, `lock_nr_earfcn`, `lock_nr_cell_band` (Band als Zahl, z. B. `78`);
+  `0,0,0` hebt die Sperre auf. Der Router meldet sie danach als `lock_nr_cell = "PCI,ARFCN,Band"`. Weicht eine Firmware ab, fragt das
+  Dashboard die Argumentnamen per ubus `list` ab und probiert sie. **Jede Änderung wird danach über `nwinfo_get_netinfo` geprüft** –
   erst eine sichtbare Änderung gilt als übernommen.
 - **Sicherheitsnetz:** Findet der Router mit der Sperre länger kein Netz (einstellbar 1–10 min, Standard 3 min), stellt das Dashboard
   automatisch auf Automatik zurück und trägt das in die Ereignisse ein.

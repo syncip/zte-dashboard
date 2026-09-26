@@ -994,8 +994,11 @@ class Router:
     # dokumentiert: Sie werden per ubus 'list' erfragt; sonst werden bekannte Schreibweisen nacheinander probiert.
     # Jede Änderung wird danach über nwinfo_get_netinfo geprüft - erst eine sichtbare Änderung gilt als Erfolg.
     LOCK_OBJ = "zte_nwinfo_api"
+    # Zellsperre: nwinfo_lock_nr_cell(lock_nr_pci, lock_nr_earfcn, lock_nr_cell_band) und
+    # nwinfo_lock_lte_cell(lock_lte_pci, lock_lte_earfcn) - Werte als Strings, "0" überall = Sperre aufheben.
+    # Der Router meldet die Sperre danach in nwinfo_get_netinfo als lock_nr_cell = "pci,arfcn,band" bzw. lock_lte_cell = "pci,earfcn".
     LOCK_METHODS = {"reset": "nwinfo_reset_band_cell_setting", "sa_bands": "nwinfo_set_sa_bandlock",
-                    "nr_cell": "nwinfo_lock_nr_cell", "lte_bands": "nwinfo_set_lte_ext_band"}
+                    "nr_cell": "nwinfo_lock_nr_cell", "lte_bands": "nwinfo_set_lte_ext_band", "lte_cell": "nwinfo_lock_lte_cell"}
 
     def lock_signature(self, refresh=False):
         """{methode: {argument: typ}} von zte_nwinfo_api (braucht den Login). Leeres dict = Router verrät es nicht."""
@@ -1039,27 +1042,32 @@ class Router:
                 out.append({names[0]: mask})
             out += [{"lte_band_lock": mask}, {"lte_band_lock": mask, "gw_band_lock": "0x000000000"},
                     {"lte_band_lock": mask.upper().replace("0X", "0x")}]
-        elif kind == "nr_cell":
-            pci, arfcn, band, scs = p["pci"], p["arfcn"], p["band"], p["scs"]
-            s4 = f"{pci},{arfcn},{band},{scs}"
-            if len(names) == 1:
-                out.append({names[0]: s4})
-            elif len(names) > 1:
+        elif kind in ("nr_cell", "lte_cell"):
+            nr = kind == "nr_cell"
+            pci, arfcn, band = str(int(p["pci"])), str(int(p["arfcn"])), str(int(p.get("band") or 0))
+            # 1. Schreibweise der Router-Weboberfläche (G5TS/G5-Serie)
+            if nr:
+                out.append({"lock_nr_pci": pci, "lock_nr_earfcn": arfcn, "lock_nr_cell_band": band})
+            else:
+                out.append({"lock_lte_pci": pci, "lock_lte_earfcn": arfcn})
+            # 2. Argumentnamen, die der Router per ubus 'list' meldet (falls abweichend)
+            if names:
                 m = {}
                 for n in names:
                     low = n.lower()
                     if "pci" in low:
-                        m[n] = str(pci)
-                    elif "arfcn" in low or "earfcn" in low or "freq" in low or "channel" in low:
-                        m[n] = str(arfcn)
-                    elif "scs" in low:
-                        m[n] = str(scs)
-                    elif "band" in low:
-                        m[n] = str(band)
+                        m[n] = pci
+                    elif "arfcn" in low or "freq" in low or "channel" in low:
+                        m[n] = arfcn
+                    elif "band" in low and nr:
+                        m[n] = band
                 if len(m) == len(names):
                     out.append(m)
-            out += [{"lock_nr_cell": s4}, {"nr5g_cell_lock": s4}, {"lock_nr_cell": f"{pci},{arfcn},{scs},{band}"},
-                    {"lock_nr_pci": str(pci), "lock_nr_earfcn": str(arfcn), "lock_nr_band": str(band), "lock_nr_scs": str(scs)}]
+            # 3. ältere Firmware: ein Feld mit allen Werten
+            if nr:
+                out.append({"lock_nr_cell": f"{pci},{arfcn},{band}"})
+            else:
+                out.append({"lock_lte_cell": f"{pci},{arfcn}"})
         uniq = []
         for v in out:
             if v not in uniq:
@@ -1076,9 +1084,11 @@ class Router:
             return set(parse_band_list(d.get("nr5g_sa_band_lock"))) == set(p["bands"])
         if kind == "lte_bands":
             return set(lte_mask_bands(d.get("lte_band_lock"))) == set(p["bands"])
-        if kind == "nr_cell":
-            c = parse_cell_lock(d.get("lock_nr_cell"))
-            return bool(c) and str(p["pci"]) in c["parts"] and str(p["arfcn"]) in c["parts"]
+        if kind in ("nr_cell", "lte_cell"):
+            c = parse_cell_lock(d.get("lock_nr_cell" if kind == "nr_cell" else "lock_lte_cell"))
+            if not int(p["pci"]) and not int(p["arfcn"]):      # Aufheben: Router meldet 0,0,0 bzw. 0,0
+                return c is None
+            return bool(c) and c["parts"][:2] == [str(int(p["pci"])), str(int(p["arfcn"]))]
         return False
 
     def apply_lock(self, kind, p, say=None):
@@ -1141,6 +1151,10 @@ class Router:
         if st["lte_locked"]:
             r = self.apply_lock("lte_bands", {"bands": st["lte_supported"]}, say)
             steps += r["steps"]
+        for kind, cell in (("nr_cell", st["nr_cell"]), ("lte_cell", st["lte_cell"])):
+            if cell:
+                r = self.apply_lock(kind, {"pci": 0, "arfcn": 0, "band": 0}, say)
+                steps += r["steps"]
         ok = lock_state(self.netinfo(), sa_supported, lte_supported)["mode"] == "auto"
         return {"ok": ok, "steps": steps, "args": None,
                 "detail": "Automatik wiederhergestellt" if ok else "Automatik konnte nicht vollständig wiederhergestellt werden"}
@@ -1452,7 +1466,6 @@ NR_BANDS_DL = [("n78", 3300, 3800), ("n77", 3300, 4200), ("n1", 2110, 2170), ("n
 LTE_BANDS_EARFCN = [(1, 0, 599), (3, 1200, 1949), (7, 2750, 3449), (8, 3450, 3799), (20, 6150, 6449), (28, 9210, 9659),
                     (32, 9920, 10359), (38, 37750, 38249), (40, 38650, 39649), (41, 39650, 41589), (42, 41590, 43589),
                     (43, 43590, 45589)]
-TDD_NR = {38, 40, 41, 77, 78, 79}
 # Bänder, die der G5TS für 5G SA meldet, wenn nichts gesperrt ist (ergänzt um alles, was der Router später meldet)
 SA_BANDS_DEFAULT = [1, 3, 7, 8, 20, 28, 38, 40, 41, 75, 77, 78]
 LTE_BANDS_DEFAULT = [1, 3, 7, 8, 20, 28, 32, 38, 40, 41, 42, 43]
@@ -1508,11 +1521,6 @@ def band_num(band):
     return int(m.group(1)) if m else None
 
 
-def default_scs(band):
-    """Unterträgerabstand in kHz: TDD-Bänder (n78 …) 30 kHz, FDD-Bänder 15 kHz."""
-    return 30 if band_num(band) in TDD_NR else 15
-
-
 def parse_neighbors(raw):
     """'768,641760;115,641760;' -> [(768, 641760), (115, 641760)]"""
     out = []
@@ -1551,7 +1559,7 @@ def lte_bands_mask(bands):
 
 
 def parse_cell_lock(raw):
-    """Zellsperre aus netinfo ('pci,arfcn,band,scs' o. ä.). Leer, '0' oder nur Nullen = keine Sperre."""
+    """Zellsperre aus netinfo (5G 'pci,arfcn,band', LTE 'pci,earfcn'). Leer oder nur Nullen ('0,0,0') = keine Sperre."""
     s = str(raw or "").strip().strip(";")
     nums = [x for x in re.split(r"[,;\s]+", s) if x]
     if not nums or all(re.fullmatch(r"0+|-1", x) for x in nums):
@@ -3538,17 +3546,14 @@ class Api:
                    ("LTE-Bänder " + ", ".join(f"B{b}" for b in bands))
         elif mode == "nr_cell":
             pci = _int(body.get("pci"), 0, 1007, None)
-            arfcn = _int(body.get("arfcn"), 0, 3279165, None)
+            arfcn = _int(body.get("arfcn"), 1, 3279165, None)
             if pci is None or arfcn is None:
                 raise ValueError("PCI (0–1007) und ARFCN angeben")
             band = band_num(body.get("band")) or band_num(nr_band_of(arfcn))
             if not band:
                 raise ValueError("Band unbekannt - bitte angeben")
-            scs = _int(body.get("scs"), 15, 120, default_scs(band))
-            if scs not in (15, 30, 60, 120):
-                raise ValueError("Unterträgerabstand (SCS) muss 15, 30, 60 oder 120 kHz sein")
-            p = {"pci": pci, "arfcn": arfcn, "band": band, "scs": scs}
-            desc = f"5G-Zelle PCI {pci} / ARFCN {arfcn} (n{band}, {scs} kHz)"
+            p = {"pci": pci, "arfcn": arfcn, "band": band}
+            desc = f"5G-Zelle PCI {pci} / ARFCN {arfcn} (n{band})"
         else:
             raise ValueError("Unbekannte Sperr-Art")
         if not col.lock_busy.acquire(blocking=False):
