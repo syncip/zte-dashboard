@@ -209,7 +209,7 @@ Beim Zoomen zeigt es den gewählten Ausschnitt und wählt bei Bedarf automatisch
 
 Grundlage ist der Monatszähler des Routers. Schätzung = bisher verbraucht (ohne heute) + max(heute, Tagesschnitt) + Tagesschnitt × verbleibende Tage.
 Tagesschnitt = Mittel der letzten bis zu 7 vollständigen Tage. Angezeigt werden Spanne (25./75. Perzentil), Güte (gut/mittel/grob)
-und zum Vergleich die lineare Hochrechnung wie bei vnStat.
+und zum Vergleich die lineare Hochrechnung.
 
 ## Datenhaltung – es wird nichts gelöscht
 
