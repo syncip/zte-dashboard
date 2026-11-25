@@ -76,6 +76,9 @@ class Config:
         self.raw_days = int(_env("RAW_DAYS", _env("RETENTION_DAYS", "30")))
         self.limit_gb = float(_env("MONTH_LIMIT_GB", "0") or 0)   # 0 = unlimited
         self.billing_day = min(28, max(1, int(_env("BILLING_DAY", "1"))))
+        # Höchste plausible Datenrate je Richtung. Der G5TS meldet gelegentlich Zählersprünge von 50-130 GB
+        # innerhalb eines Abrufintervalls; was schneller wäre, wird als Messfehler verworfen.
+        self.max_rate = max(100, float(_env("MAX_RATE_MBIT", "3000"))) * 1e6 / 8    # Byte/s
         self.static_dir = Path(_env("STATIC_DIR", str(BASE_DIR / "static")))
         self.dash_password = _env("DASH_PASSWORD", "")  # optional: schaltet beim ersten Start den Dashboard-Login ein
         self.defaults = {k: getattr(self, k) for k in
@@ -177,7 +180,65 @@ def connect(path):
     return conn
 
 
-def init_db(path):
+def plausible_delta(delta, dt, max_rate, slack=50_000_000):
+    """True, wenn `delta` Bytes in `dt` Sekunden physikalisch möglich sind."""
+    return delta <= max_rate * max(dt, 1) + slack
+
+
+def repair_counter_jumps(conn, max_rate, usage_s, billing_day=1):
+    """Einmalig: Zählersprünge des Routers aus vorhandenen Daten entfernen (traffic, traffic_h, daily, cells_h)
+    und die Summe der Sprünge seit dem letzten Monatsreset des Routers als Korrektur merken."""
+    if kv_get(conn, "repair_counter_jumps_v1"):
+        return
+    removed = []                                    # (ts, rx_bytes, tx_bytes)
+    for r in conn.execute("SELECT ts, rx_speed, tx_speed, rx_delta, tx_delta FROM traffic "
+                          "WHERE rx_speed > ? OR tx_speed > ?", (max_rate, max_rate)).fetchall():
+        rx = (r["rx_delta"] or 0) if (r["rx_speed"] or 0) > max_rate else 0
+        tx = (r["tx_delta"] or 0) if (r["tx_speed"] or 0) > max_rate else 0
+        conn.execute("UPDATE traffic SET rx_delta=rx_delta-?, tx_delta=tx_delta-?, "
+                     "rx_speed=CASE WHEN ?>0 THEN NULL ELSE rx_speed END, tx_speed=CASE WHEN ?>0 THEN NULL ELSE tx_speed END "
+                     "WHERE ts=?", (rx, tx, rx, tx, r["ts"]))
+        removed.append((r["ts"], rx, tx))
+    raw0 = conn.execute("SELECT MIN(ts) FROM traffic").fetchone()[0]
+    raw_h0 = (raw0 // HOUR * HOUR) if raw0 is not None else None
+    # Ältere Stunden (Rohdaten schon gelöscht): Sprung ~ Höchstrate x Abrufintervall
+    q = "SELECT ts, rx_max, tx_max, rx_delta, tx_delta FROM traffic_h WHERE (rx_max > ? OR tx_max > ?)"
+    args = [max_rate, max_rate]
+    if raw_h0 is not None:
+        q += " AND ts < ?"
+        args.append(raw_h0)
+    for r in conn.execute(q, args).fetchall():
+        rx = min(r["rx_delta"] or 0, int(r["rx_max"] * usage_s)) if (r["rx_max"] or 0) > max_rate else 0
+        tx = min(r["tx_delta"] or 0, int(r["tx_max"] * usage_s)) if (r["tx_max"] or 0) > max_rate else 0
+        conn.execute("UPDATE traffic_h SET rx_delta=rx_delta-?, tx_delta=tx_delta-?, rx_speed=(rx_delta-?)/3600.0, "
+                     "tx_speed=(tx_delta-?)/3600.0, rx_max=CASE WHEN ?>0 THEN NULL ELSE rx_max END, "
+                     "tx_max=CASE WHEN ?>0 THEN NULL ELSE tx_max END WHERE ts=?", (rx, tx, rx, tx, rx, tx, r["ts"]))
+        for col, b in (("rx", rx), ("tx", tx)):
+            if b:
+                row = conn.execute(f"SELECT ckey FROM cells_h WHERE ts=? ORDER BY {col} DESC LIMIT 1", (r["ts"],)).fetchone()
+                if row:
+                    conn.execute(f"UPDATE cells_h SET {col}=MAX(0,{col}-?) WHERE ts=? AND ckey=?", (b, r["ts"], row["ckey"]))
+        removed.append((r["ts"] + 1800, rx, tx))
+    for ts, rx, tx in removed:
+        day = datetime.fromtimestamp(ts).strftime("%Y-%m-%d")
+        conn.execute("UPDATE daily SET rx=MAX(0,rx-?), tx=MAX(0,tx-?) WHERE day=?", (rx, tx, day))
+    if raw0 is not None:
+        rollup(conn, raw0)                          # Stundenwerte und Zellverbrauch aus den bereinigten Rohdaten
+    # Korrektur für den Monatszähler des Routers: Sprünge seit dessen letztem Zurücksetzen
+    reset_ts = conn.execute("SELECT MAX(ts) FROM (SELECT ts, tx_month, LAG(tx_month) OVER (ORDER BY ts) p, rx_month, "
+                            "LAG(rx_month) OVER (ORDER BY ts) pr FROM traffic) WHERE tx_month < p OR rx_month < pr").fetchone()[0]
+    since = reset_ts or int(datetime.combine(billing_start(date.today(), billing_day), datetime.min.time()).timestamp())
+    corr = {"rx": sum(x[1] for x in removed if x[0] >= since), "tx": sum(x[2] for x in removed if x[0] >= since)}
+    kv_set(conn, "usage_glitch", corr)
+    kv_set(conn, "repair_counter_jumps_v1", {"ts": int(time.time()), "n": len(removed),
+                                             "rx": sum(x[1] for x in removed), "tx": sum(x[2] for x in removed)})
+    if removed:
+        add_event(conn, int(time.time()), "usage", f"{len(removed)} Zählersprünge des Routers aus dem Verlauf entfernt "
+                  f"({fmt_bytes(sum(x[1] + x[2] for x in removed))})")
+        log.info("Datenverbrauch bereinigt: %d Zählersprünge, %s", len(removed), fmt_bytes(sum(x[1] + x[2] for x in removed)))
+
+
+def init_db(path, cfg=None):
     conn = connect(path)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.executescript(SCHEMA)
@@ -187,6 +248,8 @@ def init_db(path):
         conn.execute("ALTER TABLE traffic ADD COLUMN cell TEXT")
         conn.execute(f"""UPDATE traffic SET cell = (SELECT {CKEY_SQL} FROM samples s WHERE s.ts <= traffic.ts
                          AND s.ts >= traffic.ts - 300 AND COALESCE(s.nr_rsrp, s.lte_rsrp) IS NOT NULL ORDER BY s.ts DESC LIMIT 1)""")
+    if cfg is not None:
+        repair_counter_jumps(conn, cfg.max_rate, cfg.usage_every, cfg.billing_day)
     conn.commit()
     conn.close()
 
@@ -1955,6 +2018,23 @@ class Collector(threading.Thread):
             keys = ("rx_total", "tx_total")
         rx_d = counter_delta(u[keys[0]], last.get(keys[0]))
         tx_d = counter_delta(u[keys[1]], last.get(keys[1]))
+        glitch = kv_get(conn, "usage_glitch") or {"rx": 0, "tx": 0}
+        if last and keys[0] == "rx_month" and None not in (u["rx_month"], last.get("rx_month")) and (
+                u["rx_month"] < last["rx_month"] or (u["tx_month"] or 0) < (last.get("tx_month") or 0)):
+            glitch = {"rx": 0, "tx": 0}             # Router hat seinen Monatszähler zurückgesetzt
+        # Zählersprünge (z. B. +125 GB Upload in 10 s) sind Messfehler des Routers und werden nicht mitgezählt
+        t_prev0 = last.get("t", last.get("ts"))
+        dt0 = (t_read - t_prev0) if t_prev0 is not None else self.cfg.usage_every
+        jumped = []
+        if last and not plausible_delta(rx_d, dt0, self.cfg.max_rate):
+            jumped.append(("Download", rx_d)); glitch["rx"] += rx_d; rx_d = 0
+        if last and not plausible_delta(tx_d, dt0, self.cfg.max_rate):
+            jumped.append(("Upload", tx_d)); glitch["tx"] += tx_d; tx_d = 0
+        if jumped:
+            msg = "Zählersprung des Routers verworfen: " + ", ".join(f"{n} +{fmt_bytes(b)}" for n, b in jumped) + f" in {dt0:.0f} s"
+            log.warning(msg)
+            add_event(conn, ts, "usage", msg)
+        kv_set(conn, "usage_glitch", glitch)
         # Datenrate = übertragene Bytes seit der letzten Ablesung / vergangene Zeit. Die Momentanwerte des Routers
         # werden bewusst nicht verwendet: sie sind nur Stichproben und schwanken stark.
         rx_speed = tx_speed = None
@@ -1963,7 +2043,7 @@ class Collector(threading.Thread):
             dt = t_read - t_prev
             reset = u[keys[0]] < last[keys[0]] or (u[keys[1]] or 0) < (last.get(keys[1]) or 0)
             # nach einem Zählerreset oder einer langen Lücke (z. B. Neustart des Dashboards) ist keine Rate bestimmbar
-            if 0.5 <= dt <= max(300, 5 * self.cfg.usage_every) and not reset:
+            if 0.5 <= dt <= max(300, 5 * self.cfg.usage_every) and not reset and not jumped:
                 rx_speed, tx_speed = rx_d / dt, tx_d / dt
         conn.execute("INSERT OR REPLACE INTO traffic(ts,rx_total,tx_total,rx_month,tx_month,rx_speed,tx_speed,rx_delta,tx_delta,cell) "
                      "VALUES(?,?,?,?,?,?,?,?,?,?)",
@@ -3052,7 +3132,10 @@ class Api:
                                 "ORDER BY ts DESC LIMIT 1").fetchone()
             period = {"start": bs.isoformat(), "end": nxt.isoformat(), "rx": m["rx"], "tx": m["tx"], "source": "collector"}
             if last:   # Monatszähler des Routers = Datenverbrauch seit dessen letztem Zurücksetzen
-                period.update(rx=int(last["rx_month"]), tx=int(last["tx_month"] or 0), source="router")
+                g = kv_get(conn, "usage_glitch") or {}
+                period.update(rx=max(0, int(last["rx_month"]) - int(g.get("rx", 0))),
+                              tx=max(0, int(last["tx_month"] or 0) - int(g.get("tx", 0))), source="router",
+                              corrected=int(g.get("rx", 0)) + int(g.get("tx", 0)))
             return {"days": out, "period": period, "end": last_day.isoformat(), "limit_gb": self.cfg.limit_gb,
                     "forecast": self.forecast(conn, today, bs, nxt, period["rx"] + period["tx"])}
         finally:
@@ -4135,7 +4218,7 @@ def main():
                         format="%(asctime)s %(levelname)s %(message)s")
     cfg = Config()
     if args.reset_auth:
-        init_db(cfg.db)
+        init_db(cfg.db, cfg)
         Auth(cfg.db).disable()
         print("Der Passwortschutz des Dashboards ist abgeschaltet. Beim nächsten Start kann in den Einstellungen ein neues Passwort gesetzt werden.")
         return
@@ -4167,7 +4250,7 @@ def main():
         except RouterError as exc:
             print("FEHLER:", exc)
             sys.exit(1)
-    init_db(cfg.db)
+    init_db(cfg.db, cfg)
     auth = Auth(cfg.db)
     if cfg.dash_password and not auth.enabled and not auth.a:
         try:
