@@ -1293,7 +1293,7 @@ async function loadDaily() {                      // Abrechnungszeitraum, Limit 
     const p = d.period, tot = p.rx + p.tx, [v, u] = fmtBytes(tot);
     $("#u-total").replaceChildren(document.createTextNode(v), el("small", "", u));
     const f = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
-    $("#u-period").textContent = p.source === "router" ? `Monatszähler des Routers · ab ${f(p.start)}` : `Seit Aufzeichnungsbeginn · Zeitraum ${f(p.start)} – ${f(p.end)}`;
+    $("#u-period").textContent = p.source === "router" ? `Monatszähler des Routers · ab ${f(p.start)}${p.corrected ? ` · ${fmtBytes(p.corrected)} Zählersprünge herausgerechnet` : ""}` : `Seit Aufzeichnungsbeginn · Zeitraum ${f(p.start)} – ${f(p.end)}`;
     $("#u-rx").textContent = bytesStr(p.rx); $("#u-tx").textContent = bytesStr(p.tx);
     const m = $("#u-meter"), lim = d.limit_gb, ln = $("#u-limit");
     if (lim > 0) {
